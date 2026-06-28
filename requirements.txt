@@ -1,0 +1,8 @@
+slack-bolt==1.18.1
+python-dotenv==1.2.2
+groq==1.5.0
+requests==2.32.3
+mcp==1.28.1
+# canvas-mcp is installed from git (not on PyPI):
+#   pip install "git+https://github.com/vishalsachdev/canvas-mcp.git"
+canvas-mcp @ git+https://github.com/vishalsachdev/canvas-mcp.git
