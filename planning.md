@@ -11,6 +11,29 @@ Track: New Slack Agent (MCP server integration)
 
 ---
 
+## Tech Stack (Decided)
+
+- **Language:** Python
+- **Slack:** Bolt for Python (official Slack SDK) — running in Socket Mode
+  (uses SLACK_APP_TOKEN, no public webhook URL needed during dev)
+- **LLM:** Groq API, Llama 3.3 70B (free tier, OpenAI-compatible tool calling)
+- **Canvas tools:** [canvas-mcp](https://github.com/vishalsachdev/canvas-mcp)
+  — 90 pre-built Canvas tools in MCP format (Python, MIT, last release May 2026)
+- **Deployment:** Railway or Render (cloud, free tier)
+
+### The Groq ↔ MCP Bridge
+Groq does **not** natively speak MCP. We need a small manual bridge
+(~30 lines, in `canvas_tools.py`) that reads canvas-mcp's tool definitions and
+reformats them into Groq's tool-calling schema (same shape as OpenAI function
+calling), then routes Groq's tool-call requests back to canvas-mcp. canvas-mcp
+runs as a local server alongside the Slack bot on the same machine/instance.
+
+### Groq Free Tier (plenty for a single-user bot)
+- 30 RPM · 6,000 TPM · 1,000 requests/day
+- Model: Llama 3.3 70B
+
+---
+
 ## MVP Scope (What We're Shipping First)
 
 - Single user (you) — Canvas token stored in .env file
@@ -65,18 +88,20 @@ Out of scope for MVP:
 │  │   4. REASON  — is this enough? loop again if needed        │     │
 │  │   5. RESPOND — format and return answer                    │     │
 │  │                                                            │     │
-│  │   Powered by: LLM (Claude / GPT)                           │     │
+│  │   Powered by: Groq API (Llama 3.3 70B)                     │     │
+│  │   Tools bridged from canvas-mcp → Groq tool calling        │     │
 │  └───────────┬───────────────────────────┬──────────────────┘     │
 │              │                           │                         │
 │              ▼                           ▼                         │
 │  ┌───────────────────┐    ┌────────────────────────────────┐      │
 │  │   Canvas Tools    │    │         .env File              │      │
 │  │   (MCP Tools)     │    │                                │      │
-│  │                   │    │  CANVAS_TOKEN=xxxxx            │      │
+│  │                   │    │  CANVAS_API_TOKEN=xxxxx        │      │
 │  │  get_assignments  │    │  CANVAS_BASE_URL=canvas.edu    │      │
 │  │  get_announcements│    │  SLACK_BOT_TOKEN=xxxxx         │      │
 │  │  get_todos        │    │  SLACK_SIGNING_SECRET=xxxxx    │      │
-│  │  get_calendar     │    │  LLM_API_KEY=xxxxx             │      │
+│  │  get_calendar     │    │  SLACK_APP_TOKEN=xxxxx         │      │
+│  │  get_courses      │    │  GROQ_API_KEY=xxxxx            │      │
 │  │  get_courses      │    └────────────────────────────────┘      │
 │  └───────────┬───────┘                                            │
 │              │                                                     │
@@ -171,8 +196,8 @@ Each tool:
 
 ### What Goes Into the Agent (Per Request)
 - User's natural language message
-- Canvas Bearer token (from .env)
-- Canvas base URL (from .env, e.g. `https://canvas.instructure.com`)
+- Canvas Bearer token (`CANVAS_API_TOKEN` from .env)
+- Canvas base URL (`CANVAS_BASE_URL` from .env, e.g. `https://canvas.instructure.com`)
 - Slack channel ID + thread timestamp (to reply correctly)
 
 ### What Comes Out
@@ -225,10 +250,102 @@ Each tool:
 
 ## Cloud Deployment (MVP)
 
-- Agent server runs 24/7 on a cloud VM or serverless platform
-- Slack sends webhooks to a public HTTPS URL (your server)
-- .env file is set as environment variables on the hosting platform
+- Agent server runs 24/7 on a cloud platform (Railway or Render, free tier)
+- Using **Socket Mode** for dev: Slack connects over a WebSocket via
+  `SLACK_APP_TOKEN`, so no public HTTPS URL / ngrok is needed to test locally
+- `.env` values are set as environment variables on the hosting platform
+- canvas-mcp runs as a local process alongside the bot on the same instance
 - No database needed for MVP — stateless, each request is independent
+
+---
+
+## Files to Write
+
+| File              | Purpose                                                   |
+|-------------------|-----------------------------------------------------------|
+| `app.py`          | Slack listener (Bolt, Socket Mode) — handles `app_mention` |
+| `agent.py`        | ReAct loop using Groq + Llama 3.3 70B                      |
+| `canvas_tools.py` | Bridge between Groq tool calling and canvas-mcp            |
+| `.env`            | Secrets (Canvas token + URL, Slack tokens, Groq key)      |
+| `requirements.txt`| Dependencies                                              |
+
+---
+
+## Milestones
+
+1. **Slack ↔ server** — @mention bot, it replies "I heard you". No AI yet.
+2. **Canvas connected** — run a script, see real Canvas data printed. No Slack.
+3. **Full MVP end to end** — @mention bot, get real Canvas data back via Groq agent.
+4. **Deploy to cloud** — Railway/Render, always on.
+
+---
+
+## Current Status (as of Jun 28, 2026)
+
+- ✅ **Milestone 1 DONE** — `app.py` (Bolt, Socket Mode) replies "I heard you"
+  to @mentions. Verified live in Slack.
+- ✅ **Milestone 2 DONE** — Canvas connected and verified two ways, no Slack:
+  - `canvas_check.py` — direct Canvas REST call (validated token + base URL)
+  - `canvas_mcp_check.py` — launches `canvas-mcp-server` over stdio, lists its
+    92 tools, calls `list_courses`, prints real courses
+- ✅ Dependencies installed: `slack-bolt`, `python-dotenv`, `groq`, `requests`,
+  plus `canvas-mcp` (from git) and the `mcp` client SDK
+- ✅ `.env` has all keys; **added `CANVAS_API_URL`** (= base URL + `/api/v1`),
+  which is the var name canvas-mcp requires (distinct from our `CANVAS_BASE_URL`)
+- ✅ **Milestone 3 DONE** — full MVP wired end to end (Slack → Groq agent →
+  canvas-mcp → Canvas → Slack):
+  - `canvas_tools.py` — the bridge: launches canvas-mcp over stdio, whitelists
+    9 read-only student tools, converts MCP↔Groq tool schemas
+  - `agent.py` — Groq (Llama 3.3 70B) ReAct loop; tested standalone, then wired
+  - `app.py` — `app_mention` now strips the mention, posts "🔎 Checking Canvas…",
+    runs the agent, replies in-thread (with error handling)
+  - System prompt instructs: real data only, Slack formatting, no internal IDs
+- ✅ **Post-MVP hardening DONE** (after live testing):
+  - Conditional "🔎 Checking Canvas…" — posted only when the agent actually
+    calls a tool (via `on_tool_call` callback), not for plain chat.
+  - **Conversation memory**: `app.py` reads the thread (`conversations_replies`,
+    paginated, most-recent `MAX_HISTORY=20`) and passes it as history; speaker
+    names prefixed via `users_info`. Agent is stateless — Slack is the store.
+  - **Reliability caps**: `GROQ_TIMEOUT=30s`, `TOOL_TIMEOUT=25s`,
+    `AGENT_TIMEOUT=75s` hard ceiling, plus **retry dedupe** by `client_msg_id`.
+  - System prompt upgraded: chat (no tools) for greetings; answer only what's
+    asked; say "I don't see any" instead of relabeling; use speaker names.
+- ⬜ Milestone 4: deploy to cloud (Railway/Render) as a background worker
+
+### More plan corrections (Milestone 3 + hardening)
+- Slack redelivers events not acked within ~3s; our handler is slow, so without
+  dedupe each redelivery spawned a duplicate agent run (runaway `list_courses`).
+  Fixed with `already_handled(client_msg_id)`.
+- `conversations_replies` returns thread messages **oldest-first**; to get the
+  freshest context we paginate and take the tail, not `limit=K`.
+- Slack scopes required: `app_mentions:read`, `chat:write`, `channels:history`,
+  `groups:history`, `im:history`, `mpim:history`, `users:read`. Reinstalling to
+  add scopes can rotate `SLACK_BOT_TOKEN` — update `.env`.
+- `groq==0.9.0` from the plan was incompatible with current `httpx`
+  (`proxies` kwarg removed) — upgraded to `groq==1.5.0`.
+- Groq model id: `llama-3.3-70b-versatile`.
+- Known data quirk: `list_courses` returns archived + non-class enrollments
+  (e.g. clubs); "active enrollment" ≠ "current term class". Tighten later by
+  filtering on term / excluding archived.
+
+### Corrections to the original plan (learned while building)
+- canvas-mcp speaks MCP over **stdio** — we spawn `canvas-mcp-server` as a
+  subprocess and talk over its stdin/stdout (not a network port).
+- canvas-mcp requires env var **`CANVAS_API_URL`** with the `/api/v1` path,
+  not `CANVAS_BASE_URL`.
+- The "bridge" is two parts, not just reformatting: (a) an MCP **client**
+  (`mcp` SDK) to launch + call canvas-mcp, and (b) the **schema translation**
+  MCP tool defs → Groq tool-calling format, and Groq tool calls → MCP `call_tool`.
+- canvas-mcp anonymizes user names (privacy feature) and returns pre-formatted
+  text from tools, not raw JSON.
+
+**Next step:** Milestone 4 — deploy to cloud (Railway/Render) as a long-running
+**background worker** (NOT a web service — Socket Mode needs no port). Set all
+`.env` vars as platform env vars. Note canvas-mcp installs from git, and the bot
+spawns `canvas-mcp-server` as a subprocess, so it must be on PATH in the deploy
+image. Optional polish before/after deploy: pre-filter `list_courses` (drop
+archived / non-class enrollments), and consider reading channel-level context
+(not just thread).
 
 ---
 
