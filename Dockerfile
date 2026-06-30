@@ -20,4 +20,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Socket Mode opens an outbound WebSocket — there is nothing to EXPOSE.
-CMD ["python", "app.py"]
+CMD ["python", "-m", "canvas_bot.main"]

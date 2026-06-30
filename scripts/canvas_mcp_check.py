@@ -2,9 +2,9 @@
 
 Exercises the same bridge the agent uses — launches `canvas-mcp-server` over
 stdio, lists the tools we whitelist, and calls `list_courses` — so you can
-confirm the MCP layer works before wiring in the LLM. Run with:
+confirm the MCP layer works before wiring in the LLM. Run from the repo root:
 
-    python canvas_mcp_check.py
+    python -m scripts.canvas_mcp_check
 """
 
 import asyncio
@@ -12,7 +12,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from canvas_tools import ALLOWED_TOOLS, canvas_session, result_to_text
+from canvas_bot.canvas.bridge import ALLOWED_TOOLS, canvas_session, result_to_text
 
 load_dotenv()
 

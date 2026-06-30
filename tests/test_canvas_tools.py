@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from canvas_tools import ALLOWED_TOOLS, result_to_text, to_groq_tools
+from canvas_bot.canvas.bridge import ALLOWED_TOOLS, result_to_text, to_groq_tools
 
 
 def _mcp_tool(name, description="", input_schema=None):

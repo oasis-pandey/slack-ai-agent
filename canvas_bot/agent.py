@@ -6,7 +6,7 @@ run_agent(user_text) -> str
      and loop. If it answers, return the answer.
 
 This module knows nothing about Slack — it takes text in, returns text out, so
-it can be tested standalone (see `python agent.py "<question>"`).
+it can be tested standalone (see `python -m canvas_bot.agent "<question>"`).
 """
 
 import asyncio
@@ -14,11 +14,13 @@ import datetime
 import json
 import os
 import sys
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 from groq import BadRequestError, Groq
 
-from canvas_tools import canvas_session, result_to_text, to_groq_tools
+from .canvas import rest as canvas_rest
+from .canvas.bridge import canvas_session, result_to_text, to_groq_tools
 
 load_dotenv()
 
@@ -67,10 +69,24 @@ re-check the id from `list_courses` or tell the user you couldn't find it.
 - You are READ-ONLY — you cannot create or change anything in Canvas yet. If \
 asked to, say writing isn't supported yet.
 
-## Formatting for Slack
-- Be concise: a short intro line, then bullet points only if there's a list.
+## Formatting for Slack — keep it minimal and clean
+- Lead with the answer. No preamble ("Sure!", "Here is what I found"). Get to it.
+- Use a tight bulleted list (`•`) only when there are multiple items; otherwise \
+one or two short sentences. Never a wall of text.
+- Bold just the key thing per line (e.g. *the assignment name*), nothing else.
 - Refer to courses/assignments by NAME. Never show internal IDs.
-- Use friendly dates ("Mon Jun 30"), not raw timestamps."""
+- Friendly dates ("Mon Jun 30"), never raw timestamps. At most one emoji, and \
+only if it genuinely helps. Cut anything the user didn't ask for."""
+
+
+@dataclass
+class AgentResult:
+    """What run_agent returns: the natural-language answer plus any structured
+    announcement records gathered along the way (so the Slack layer can render
+    them as clickable blocks instead of plain text)."""
+
+    text: str
+    announcements: list = field(default_factory=list)
 
 
 def _tool_use_failed_detail(err: BadRequestError):
@@ -83,8 +99,8 @@ def _tool_use_failed_detail(err: BadRequestError):
     return None
 
 
-async def run_agent(history: list[dict], on_tool_call=None) -> str:
-    """Run the ReAct loop over a conversation and return the final answer.
+async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
+    """Run the ReAct loop over a conversation and return an AgentResult.
 
     `history` is a list of {"role": "user"|"assistant", "content": str} in
     chronological order (the last entry is the user's current message). Passing
@@ -94,10 +110,16 @@ async def run_agent(history: list[dict], on_tool_call=None) -> str:
     `on_tool_call`, if given, is called once (with no args) the first time the
     agent decides to hit Canvas — so the caller can show a "Checking Canvas…"
     notice only when it's actually warranted, not for plain chat.
+
+    When the model fetches announcements, we also pull structured records (via
+    Canvas REST) so the Slack layer can render them as clickable blocks; they
+    ride back on AgentResult.announcements.
     """
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
     today = datetime.date.today().strftime("%A, %B %d, %Y")
     notified = False
+    announcements: list = []
+    seen_announcements: set = set()
 
     async with canvas_session() as session:
         tools = to_groq_tools((await session.list_tools()).tools)
@@ -145,7 +167,10 @@ async def run_agent(history: list[dict], on_tool_call=None) -> str:
 
             # No tool calls -> Groq has its final answer.
             if not msg.tool_calls:
-                return msg.content or "(I didn't produce a response.)"
+                return AgentResult(
+                    text=msg.content or "(I didn't produce a response.)",
+                    announcements=announcements,
+                )
 
             # First time we actually reach for Canvas, let the caller know.
             if on_tool_call and not notified:
@@ -190,6 +215,22 @@ async def run_agent(history: list[dict], on_tool_call=None) -> str:
                 except Exception as e:  # surface tool failures to the model
                     text = f"Error calling {tc.function.name}: {e}"
 
+                # canvas-mcp's announcement text lacks IDs, so when the model
+                # lists announcements we re-fetch structured records directly
+                # from Canvas REST for the clickable Slack UI. Best-effort: a
+                # failure here just means no rich blocks, the text answer stands.
+                if tc.function.name == "list_announcements":
+                    course_id = args.get("course_identifier")
+                    if course_id is not None:
+                        try:
+                            for rec in canvas_rest.list_course_announcements(course_id):
+                                key = (rec["course_id"], rec["id"])
+                                if key not in seen_announcements:
+                                    seen_announcements.add(key)
+                                    announcements.append(rec)
+                        except Exception:
+                            pass
+
                 messages.append(
                     {
                         "role": "tool",
@@ -199,13 +240,19 @@ async def run_agent(history: list[dict], on_tool_call=None) -> str:
                     }
                 )
 
-        return (
-            "I looked into that but couldn't wrap it up — try asking something "
-            "more specific."
+        return AgentResult(
+            text=(
+                "I looked into that but couldn't wrap it up — try asking "
+                "something more specific."
+            ),
+            announcements=announcements,
         )
 
 
 if __name__ == "__main__":
     question = " ".join(sys.argv[1:]) or "What assignments do I have coming up?"
     print(f"Q: {question}\n")
-    print(asyncio.run(run_agent([{"role": "user", "content": question}])))
+    result = asyncio.run(run_agent([{"role": "user", "content": question}]))
+    print(result.text)
+    if result.announcements:
+        print(f"\n[{len(result.announcements)} announcement(s) for the Slack UI]")

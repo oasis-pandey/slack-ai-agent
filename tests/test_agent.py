@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from agent import _tool_use_failed_detail
+from canvas_bot.agent import _tool_use_failed_detail
 
 
 def test_detects_tool_use_failed_and_returns_message():

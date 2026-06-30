@@ -1,7 +1,7 @@
 """Tests for the Slack-side helpers: dedupe and thread -> history building."""
 
-import slack_helpers
-from slack_helpers import already_handled, build_history
+from canvas_bot.slack import helpers as slack_helpers
+from canvas_bot.slack.helpers import already_handled, build_history
 
 
 def setup_function():

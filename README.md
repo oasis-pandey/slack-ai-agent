@@ -21,26 +21,42 @@ CanvasBot: Here's what's coming up:
 
 Three layers run in **one process**:
 
-| Layer | File | Role |
-|-------|------|------|
-| **Slack** | `app.py` | Bolt for Python in Socket Mode. Handles `app_mention`, reads the thread for context, posts the reply in-thread. |
-| **Agent** | `agent.py` | A ReAct loop on Groq (`llama-3.3-70b-versatile`). Takes conversation history, returns the final answer. Knows nothing about Slack. |
-| **Bridge + tools** | `canvas_tools.py` | Spawns `canvas-mcp-server` over stdio and translates between MCP and Groq's tool-calling format. |
+| Layer | Module | Role |
+|-------|--------|------|
+| **Slack** | `canvas_bot/main.py` | Bolt for Python in Socket Mode. Handles `app_mention`, reads the thread for context, posts/edits the reply in-thread, and opens the announcement modal. |
+| **Agent** | `canvas_bot/agent.py` | A ReAct loop on Groq (`llama-3.3-70b-versatile`). Takes conversation history, returns the answer (+ any structured announcements). Knows nothing about Slack. |
+| **Canvas** | `canvas_bot/canvas/` | `bridge.py` spawns `canvas-mcp-server` over stdio and translates MCP ↔ Groq tool-calling; `rest.py` hits the Canvas REST API directly for structured announcement data. |
+| **Slack UI** | `canvas_bot/slack/` | `helpers.py` (pure: dedupe, thread→history); `blocks.py` (pure: Block Kit list + modal builders). |
+
+### Project layout
+
+```
+canvas_bot/            application package
+  main.py              Slack wiring + entry point (python -m canvas_bot.main)
+  agent.py             ReAct loop
+  canvas/bridge.py     Groq ↔ canvas-mcp bridge
+  canvas/rest.py       direct Canvas REST (structured announcements)
+  slack/helpers.py     dedupe + thread→history (pure)
+  slack/blocks.py      Block Kit list & modal builders (pure)
+scripts/               standalone smoke checks (canvas_check, canvas_mcp_check)
+tests/                 pytest suite (no network/secrets)
+docs/planning.md       milestone log & design decisions
+```
 
 ### Request flow
 
 ```
 @mention
-  → app.py        dedupe Slack retry, read thread → history
-  → run_agent()   Groq reasons, picks a Canvas tool
-  → canvas_tools  calls canvas-mcp over stdio → Canvas REST API
+  → main.py            dedupe Slack retry, read thread → history
+  → run_agent()        Groq reasons, picks a Canvas tool
+  → canvas/bridge.py   calls canvas-mcp over stdio → Canvas REST API
   → result back to Groq → loops or answers
-  → app.py        posts the reply in-thread
+  → main.py            edits the status message in place with the answer
 ```
 
 ### The Groq ↔ MCP bridge
 
-Groq doesn't speak MCP natively. `canvas_tools.py` does two things: (a) acts as an MCP
+Groq doesn't speak MCP natively. `canvas/bridge.py` does two things: (a) acts as an MCP
 **client** that launches canvas-mcp and calls its tools, and (b) does **schema
 translation** — MCP tool definitions → Groq `tools` schema, and MCP tool results → plain
 text. canvas-mcp exposes ~92 tools; we whitelist **9 read-only student tools**
@@ -92,21 +108,21 @@ GROQ_API_KEY=...
 source .venv/bin/activate
 
 # Run the bot (long-running, Socket Mode — no public URL needed)
-python app.py
-# Stop it with: pkill -f "app.py"
+python -m canvas_bot.main
+# Stop it with: pkill -f "canvas_bot.main"
 
-# Standalone checks (no Slack):
-python canvas_check.py                    # direct Canvas REST
-python canvas_mcp_check.py                # canvas-mcp over MCP
-python agent.py "what's due this week?"   # full agent loop in the terminal
+# Standalone checks (no Slack), from the repo root:
+python -m scripts.canvas_check               # direct Canvas REST
+python -m scripts.canvas_mcp_check           # canvas-mcp over MCP
+python -m canvas_bot.agent "what's due this week?"   # full agent loop in the terminal
 ```
 
 ## Tests
 
 Pure logic — the Groq↔MCP bridge, retry dedupe, and thread→history building — is
-covered by a `pytest` suite that needs no network or secrets (the Slack helpers were
-split into `slack_helpers.py` precisely so they're importable without a live
-`auth_test()`). CI runs them on every push and PR.
+covered by a `pytest` suite that needs no network or secrets (the pure Slack helpers
+and Block Kit builders live in `canvas_bot/slack/` precisely so they're importable
+without a live `auth_test()`). CI runs them on every push and PR.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
@@ -128,8 +144,7 @@ outbound WebSocket, so there's no port to expose. It's containerized via the
 3. Deploy. Watch the logs for `⚡️ Canvas agent is running (Socket Mode)…`, then
    @mention the bot in Slack.
 
-No public URL, database, or open port is required. `Procfile` (`worker: python app.py`)
-is included for platforms like Render/Heroku that prefer it.
+No public URL, database, or open port is required.
 
 ## Conventions
 
@@ -141,7 +156,7 @@ is included for platforms like Render/Heroku that prefer it.
 ## Troubleshooting
 
 - **Duplicate replies** — two connected Socket Mode clients make Slack round-robin
-  events. Fully stop the old process (`pkill -f "app.py"`) before starting a new one.
+  events. Fully stop the old process (`pkill -f "canvas_bot.main"`) before starting a new one.
 - **`SSL: CERTIFICATE_VERIFY_FAILED` on startup** (macOS python.org build) — run once:
   `"/Applications/Python 3.13/Install Certificates.command"`.
 - **`groq` errors on `proxies` kwarg** — needs `groq>=1.x`; `0.9.0` breaks on current
@@ -149,6 +164,6 @@ is included for platforms like Render/Heroku that prefer it.
 
 ## Status
 
-Working MVP — Milestones 1–3 done (Slack ↔ server, Canvas connected, full end-to-end
-agent), with a test suite + CI and a containerized Railway deploy (Milestone 4). See
-[`planning.md`](planning.md) for the full milestone log and design decisions.
+Working MVP — Slack ↔ agent ↔ Canvas end to end, with a clickable announcement modal, a
+test suite + CI, and a containerized Railway deploy. Next up: write-to-Canvas features.
+See [`docs/planning.md`](docs/planning.md) for the full milestone log and design decisions.
