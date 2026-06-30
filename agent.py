@@ -16,7 +16,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from groq import Groq
+from groq import BadRequestError, Groq
 
 from canvas_tools import canvas_session, result_to_text, to_groq_tools
 
@@ -56,8 +56,14 @@ in your reply.
 ## Data integrity
 - Use tools to get REAL data. Never invent course names, assignment names, due \
 dates, or grades. If a tool errors or returns nothing, say so plainly.
-- Prefer the `get_my_*` tools (they span all courses, no arguments). Use \
-`list_courses` first if you need a course to drill into.
+- Prefer the `get_my_*` tools (they span all courses, no arguments).
+- Course-specific tools (`list_announcements`, `list_assignments`, \
+`get_syllabus`, `get_assignment_details`) take a `course_identifier`. This MUST \
+be the course's NUMERIC id, passed as a STRING (e.g. "2228696") — NEVER the \
+course name or code. So always call `list_courses` FIRST, find the course the \
+user means, then call the course-specific tool with that course's numeric id. \
+If a course tool 404s or errors, don't keep retrying the same identifier — \
+re-check the id from `list_courses` or tell the user you couldn't find it.
 - You are READ-ONLY — you cannot create or change anything in Canvas yet. If \
 asked to, say writing isn't supported yet.
 
@@ -65,6 +71,16 @@ asked to, say writing isn't supported yet.
 - Be concise: a short intro line, then bullet points only if there's a list.
 - Refer to courses/assignments by NAME. Never show internal IDs.
 - Use friendly dates ("Mon Jun 30"), not raw timestamps."""
+
+
+def _tool_use_failed_detail(err: BadRequestError):
+    """If `err` is Groq's 'tool_use_failed' schema rejection, return its human
+    message (so we can feed it back to the model); otherwise return None."""
+    body = getattr(err, "body", None)
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict) and error.get("code") == "tool_use_failed":
+        return error.get("message") or "arguments did not match the tool schema."
+    return None
 
 
 async def run_agent(history: list[dict], on_tool_call=None) -> str:
@@ -93,14 +109,38 @@ async def run_agent(history: list[dict], on_tool_call=None) -> str:
         for _ in range(MAX_STEPS):
             # Groq's SDK is synchronous; blocking here is fine (nothing else
             # runs during a single user's request).
-            resp = client.chat.completions.create(
-                model=MODEL,
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-                temperature=0.2,
-                timeout=GROQ_TIMEOUT,
-            )
+            try:
+                resp = client.chat.completions.create(
+                    model=MODEL,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=0.2,
+                    timeout=GROQ_TIMEOUT,
+                )
+            except BadRequestError as e:
+                # Groq validates the model's tool-call arguments against the
+                # tool schema server-side and 400s with "tool_use_failed" when
+                # they don't match (e.g. it emits a numeric course id where the
+                # schema wants a string). The bad turn never lands in `messages`,
+                # so we feed the error back and let the model retry — bounded by
+                # MAX_STEPS. Anything else is a real error; re-raise it.
+                detail = _tool_use_failed_detail(e)
+                if detail is None:
+                    raise
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "Your last tool call was rejected: "
+                            f"{detail} Retry it with arguments that match the "
+                            "tool's schema exactly. In particular, ID-like "
+                            'parameters (e.g. course_identifier) must be strings '
+                            '("2228696"), not numbers.'
+                        ),
+                    }
+                )
+                continue
             msg = resp.choices[0].message
 
             # No tool calls -> Groq has its final answer.
