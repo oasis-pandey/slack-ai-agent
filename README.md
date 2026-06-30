@@ -113,6 +113,24 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest -q
 ```
 
+## Deploy (Railway)
+
+The bot runs as a **long-lived worker**, not a web service — Socket Mode opens an
+outbound WebSocket, so there's no port to expose. It's containerized via the
+`Dockerfile` (which installs `git` so canvas-mcp's git dependency resolves, and puts
+`canvas-mcp-server` on `PATH`).
+
+1. Create a new Railway project from this GitHub repo. Railway reads `railway.json` and
+   builds the `Dockerfile`.
+2. Add every `.env` key as a Railway **service variable**: `SLACK_BOT_TOKEN`,
+   `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, `CANVAS_API_TOKEN`, `CANVAS_BASE_URL`,
+   `CANVAS_API_URL`, `GROQ_API_KEY`.
+3. Deploy. Watch the logs for `⚡️ Canvas agent is running (Socket Mode)…`, then
+   @mention the bot in Slack.
+
+No public URL, database, or open port is required. `Procfile` (`worker: python app.py`)
+is included for platforms like Render/Heroku that prefer it.
+
 ## Conventions
 
 - **Read-only.** If asked to write or modify Canvas, the bot says writing isn't
@@ -132,5 +150,5 @@ python -m pytest -q
 ## Status
 
 Working MVP — Milestones 1–3 done (Slack ↔ server, Canvas connected, full end-to-end
-agent). Remaining: **Milestone 4** — deploy to cloud (Railway/Render) as a background
-worker. See [`planning.md`](planning.md) for the full milestone log and design decisions.
+agent), with a test suite + CI and a containerized Railway deploy (Milestone 4). See
+[`planning.md`](planning.md) for the full milestone log and design decisions.
