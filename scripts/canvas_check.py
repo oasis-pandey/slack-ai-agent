@@ -1,9 +1,9 @@
 """Standalone smoke check: hit the Canvas REST API directly (no Slack, no MCP).
 
 Validates that CANVAS_API_TOKEN + CANVAS_BASE_URL in .env actually work by
-listing your active course enrollments. Run it after setting up .env:
+listing your active course enrollments. Run from the repo root after .env setup:
 
-    python canvas_check.py
+    python -m scripts.canvas_check
 """
 
 import os

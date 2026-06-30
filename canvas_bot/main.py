@@ -12,8 +12,14 @@ from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from agent import run_agent
-from slack_helpers import (
+from .agent import AgentResult, run_agent
+from .canvas import rest as canvas_rest
+from .slack.blocks import (
+    ACTION_VIEW_ANNOUNCEMENT,
+    announcement_list_blocks,
+    announcement_modal_view,
+)
+from .slack.helpers import (
     MENTION_RE,
     WORKING_MSG,
     already_handled,
@@ -45,8 +51,8 @@ def handle_mention(event, client, say):
     question = MENTION_RE.sub("", event.get("text", "")).strip()
 
     if not question:
-        say(text="Ask me about your Canvas — assignments, to-dos, grades, "
-                 "announcements. e.g. \"what's due this week?\"",
+        say(text="Ask me anything about your Canvas — assignments, grades, "
+                 "announcements. Try *\"what's due this week?\"*",
             thread_ts=thread_ts)
         return
 
@@ -62,15 +68,19 @@ def handle_mention(event, client, say):
         )
         history = [{"role": "user", "content": question}]
 
-    # Posted only if/when the agent actually decides to call a Canvas tool —
-    # so plain chat ("hey") doesn't get a misleading "Checking Canvas…".
+    # Post a single status message the first time the agent hits Canvas, then
+    # edit it in place with the final answer — so the user sees one tidy message
+    # that resolves, not a "Checking…" line left dangling above the reply.
+    # Plain chat ("hey") never triggers this, so it just gets a direct reply.
+    placeholder = {}
+
     def notify_canvas():
-        say(text=WORKING_MSG, thread_ts=thread_ts)
+        placeholder["ts"] = say(text=WORKING_MSG, thread_ts=thread_ts)["ts"]
 
     try:
         # run_agent is async; each mention gets its own short-lived event loop.
         # Hard timeout guarantees the handler always terminates.
-        answer = asyncio.run(
+        result = asyncio.run(
             asyncio.wait_for(
                 run_agent(history, on_tool_call=notify_canvas),
                 timeout=AGENT_TIMEOUT,
@@ -78,12 +88,41 @@ def handle_mention(event, client, say):
         )
     except asyncio.TimeoutError:
         logging.warning("agent run exceeded %ss", AGENT_TIMEOUT)
-        answer = "That one's taking too long — try a more specific question?"
+        result = AgentResult("That took too long — try a more specific question?")
     except Exception:
         logging.exception("agent failed")
-        answer = "Sorry — something went wrong reaching Canvas. Try again in a moment."
+        result = AgentResult("Something went wrong reaching Canvas. Try again in a moment.")
 
-    say(text=answer, thread_ts=thread_ts)
+    # Rich path: clickable announcement list (each "View" opens a modal). `text`
+    # is the notification/accessibility fallback shown when blocks render.
+    blocks = announcement_list_blocks(result.announcements) if result.announcements else None
+    text = result.text or ("Here are your announcements:" if blocks else "(no response)")
+
+    if placeholder.get("ts"):
+        client.chat_update(
+            channel=event["channel"], ts=placeholder["ts"], text=text, blocks=blocks
+        )
+    else:
+        say(text=text, blocks=blocks, thread_ts=thread_ts)
+
+
+@app.action(ACTION_VIEW_ANNOUNCEMENT)
+def handle_view_announcement(ack, body, client, logger):
+    """Open a modal with the full announcement body when "View" is clicked.
+
+    `ack()` must fire within 3s and the trigger_id is short-lived, so we fetch
+    the single announcement and open the modal immediately.
+    """
+    ack()
+    try:
+        course_id, topic_id = body["actions"][0]["value"].split(":", 1)
+        announcement = canvas_rest.get_announcement(course_id, topic_id)
+        client.views_open(
+            trigger_id=body["trigger_id"],
+            view=announcement_modal_view(announcement),
+        )
+    except Exception:
+        logger.exception("failed to open announcement modal")
 
 
 if __name__ == "__main__":

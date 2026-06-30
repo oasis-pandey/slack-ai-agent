@@ -1,7 +1,7 @@
 """Pure Slack-side helpers, free of import-time side effects.
 
-These functions are split out from `app.py` so they can be unit-tested without
-constructing a Slack `App` or making the live `auth_test()` call that `app.py`
+These functions are split out from `main.py` so they can be unit-tested without
+constructing a Slack `App` or making the live `auth_test()` call that `main.py`
 does at import time. Everything here takes its Slack `client` as an argument and
 talks only through the WebClient interface, so tests can pass a mock.
 """
