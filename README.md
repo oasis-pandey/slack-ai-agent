@@ -1,5 +1,7 @@
 # Canvas Slack Agent
 
+[![CI](https://github.com/oasis-pandey/slack-ai-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/oasis-pandey/slack-ai-agent/actions/workflows/ci.yml)
+
 A **Canvas LMS assistant that lives in Slack.** @mention the bot in a thread, ask a
 natural-language question about your Canvas — courses, assignments, to-dos, grades,
 announcements, or syllabus — and a ReAct agent answers with real data pulled live from
@@ -97,6 +99,18 @@ python app.py
 python canvas_check.py                    # direct Canvas REST
 python canvas_mcp_check.py                # canvas-mcp over MCP
 python agent.py "what's due this week?"   # full agent loop in the terminal
+```
+
+## Tests
+
+Pure logic — the Groq↔MCP bridge, retry dedupe, and thread→history building — is
+covered by a `pytest` suite that needs no network or secrets (the Slack helpers were
+split into `slack_helpers.py` precisely so they're importable without a live
+`auth_test()`). CI runs them on every push and PR.
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest -q
 ```
 
 ## Conventions
