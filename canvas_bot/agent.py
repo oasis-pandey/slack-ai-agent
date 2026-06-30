@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
-from groq import BadRequestError, Groq
+from groq import BadRequestError, Groq, RateLimitError
 
 from .canvas import rest as canvas_rest
 from .canvas.bridge import canvas_session, result_to_text, to_groq_tools
@@ -139,6 +139,16 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                     tool_choice="auto",
                     temperature=0.2,
                     timeout=GROQ_TIMEOUT,
+                )
+            except RateLimitError:
+                # Free-tier Groq quota (per-minute or per-day tokens) is spent.
+                # Tell the user plainly instead of a generic failure.
+                return AgentResult(
+                    text=(
+                        "I've hit my AI usage limit for now (Groq free tier). "
+                        "Give it a few minutes and ask again. 🙏"
+                    ),
+                    announcements=announcements,
                 )
             except BadRequestError as e:
                 # Groq validates the model's tool-call arguments against the
