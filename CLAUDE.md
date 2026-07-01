@@ -14,6 +14,22 @@ Done: Slack ↔ agent ↔ canvas-mcp end to end; pytest suite + GitHub Actions C
 containerized (Dockerfile + `railway.json`), build run + validated locally against a real
 Canvas. **Next: write-to-Canvas features** (currently read-only).
 
+### Working state / handoff (read this first)
+
+- **Current branch: `feature-announcement-modal`** → open as **PR #3** (supersedes PR #2,
+  which had the tool-call fixes; those commits are included in #3). **`main` is behind** —
+  PR #3 is not merged yet. To land it, merge PR #3 on GitHub (direct pushes to `main` are
+  blocked without explicit user OK).
+- The big package reorg (flat files → `canvas_bot/` package), the announcement modal, the
+  in-place status-message edit, the minimal-Slack-output prompt, and the tool-call /
+  rate-limit fixes all live on this branch.
+- **Local test loop:** the image is `canvas-slack-agent`; a container named
+  `canvas-bot-test` is run detached against `.env` to test live in Slack
+  (`docker run -d --name canvas-bot-test --env-file .env canvas-slack-agent`). Stop it with
+  `docker rm -f canvas-bot-test`. Only run ONE Socket Mode client at a time.
+- 31 tests pass; Docker build validated; verified end to end against a real Canvas
+  (courses, grades, announcements + modal).
+
 ## What This Is
 
 A Canvas LMS assistant in Slack. @mention the bot in a thread, ask a natural-language
@@ -80,6 +96,8 @@ config (Socket Mode needs no Request URL — just the toggle).
 - **Retry dedupe** by `client_msg_id` (`already_handled`). Essential: the handler is
   slow (>3s), so Slack redelivers the event and *without* dedupe each redelivery spawns
   a duplicate agent run + canvas-mcp subprocess.
+- **Rate limits**: the agent catches Groq `RateLimitError` and returns a friendly
+  "hit my AI usage limit" message instead of a generic failure.
 
 ### Conversation memory = Slack, not us
 
@@ -118,6 +136,10 @@ installs `git` so it resolves and puts `canvas-mcp-server` on PATH.
 - **`SSL: CERTIFICATE_VERIFY_FAILED` on startup** (macOS python.org Python): run once
   `"/Applications/Python 3.13/Install Certificates.command"`. Environment issue, not code.
 - **`groq` must be ≥1.x.** `groq==0.9.0` breaks on current `httpx` (`proxies` kwarg).
+- **Groq free tier has a daily token cap** (100k TPD for `llama-3.3-70b-versatile`).
+  Heavy back-to-back testing exhausts it (429 `rate_limit_exceeded`, resets after a
+  short window / daily). For iterating without burning it, temporarily switch `MODEL` to
+  `llama-3.1-8b-instant` (separate quota, far cheaper) — or upgrade to Dev tier.
 
 ## Configuration
 
