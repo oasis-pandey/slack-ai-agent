@@ -10,9 +10,12 @@ modal). Hackathon project (Slack Agent Builder Challenge, deadline Jul 13 2026).
 `docs/planning.md` is the source of truth for milestone status and the running log of
 plan corrections — read it.
 
-Done: Slack ↔ agent ↔ canvas-mcp end to end; pytest suite + GitHub Actions CI;
-containerized (Dockerfile + `railway.json`), build run + validated locally against a real
-Canvas. **Next: write-to-Canvas features** (currently read-only).
+Done (all merged to `main` via PRs #1–#3): Slack ↔ agent ↔ canvas-mcp end to end;
+clickable announcement modal; pytest suite (31 tests) + GitHub Actions CI; containerized
+(Dockerfile + `railway.json`), build run + validated locally against a real Canvas.
+**Next: write-to-Canvas features** (currently read-only) — start on a fresh branch off
+`main`. Note: Railway deploy config exists but the bot has only been run locally (Docker)
+so far, not yet deployed to the cloud.
 
 ## What This Is
 
@@ -80,6 +83,8 @@ config (Socket Mode needs no Request URL — just the toggle).
 - **Retry dedupe** by `client_msg_id` (`already_handled`). Essential: the handler is
   slow (>3s), so Slack redelivers the event and *without* dedupe each redelivery spawns
   a duplicate agent run + canvas-mcp subprocess.
+- **Rate limits**: the agent catches Groq `RateLimitError` and returns a friendly
+  "hit my AI usage limit" message instead of a generic failure.
 
 ### Conversation memory = Slack, not us
 
@@ -118,6 +123,14 @@ installs `git` so it resolves and puts `canvas-mcp-server` on PATH.
 - **`SSL: CERTIFICATE_VERIFY_FAILED` on startup** (macOS python.org Python): run once
   `"/Applications/Python 3.13/Install Certificates.command"`. Environment issue, not code.
 - **`groq` must be ≥1.x.** `groq==0.9.0` breaks on current `httpx` (`proxies` kwarg).
+- **Groq free tier has a daily token cap** (100k TPD for `llama-3.3-70b-versatile`).
+  Heavy back-to-back testing exhausts it (429 `rate_limit_exceeded`, resets after a short
+  window / daily). To iterate without burning it, temporarily switch `MODEL` to
+  `llama-3.1-8b-instant` (separate quota, far cheaper) — or upgrade to Dev tier.
+- **Local live-test loop:** build `docker build -t canvas-slack-agent .`, run detached
+  `docker run -d --name canvas-bot-test --env-file .env canvas-slack-agent`, watch with
+  `docker logs canvas-bot-test`, stop with `docker rm -f canvas-bot-test`. Run only ONE
+  Socket Mode client at a time (see the orphaned-bots gotcha above).
 
 ## Configuration
 
