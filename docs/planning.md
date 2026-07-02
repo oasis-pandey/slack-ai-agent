@@ -312,6 +312,24 @@ Each tool:
     asked; say "I don't see any" instead of relabeling; use speaker names.
 - ⬜ Milestone 4: deploy to cloud (Railway/Render) as a background worker
 
+### Write-to-Canvas MVP (branch `canvas-write-mvp`, Jul 2, 2026)
+- Went from read-only to a small, deliberate write set. canvas-mcp exposes ~30
+  mutating tools (mostly educator: create/grade/module/page/rubric/delete). We
+  whitelist only 4 (`WRITE_TOOLS` in `bridge.py`): `create_announcement`,
+  `create_discussion_topic`, `post_discussion_entry`, `reply_to_discussion_entry`.
+- Added 2 supporting read tools (`list_discussion_topics`, `list_discussion_entries`)
+  so the agent can resolve the `topic_id`/`entry_id` those writes need.
+- Skipped for MVP: `send_conversation` (needs resolving recipient user-IDs) and all
+  submit/grade/module/page/delete tools.
+- Role note: this token is Student in 6 courses, TA in 1, Teacher in 2 — so the
+  create-* tools only succeed in the TA/teacher courses; the agent surfaces the
+  permission error rather than pretending success.
+- **Safety = mandatory confirmation.** Writes are irreversible and visible to others,
+  so the system prompt forbids calling a write tool on the first request: the agent
+  resolves details, restates exactly what it'll do, and waits for the user to confirm
+  ("yes") in a follow-up message before writing. Verified: a first write request only
+  hits `list_courses` (GET) and asks to confirm — no POST.
+
 ### More plan corrections (Milestone 3 + hardening)
 - Slack redelivers events not acked within ~3s; our handler is slow, so without
   dedupe each redelivery spawned a duplicate agent run (runaway `list_courses`).

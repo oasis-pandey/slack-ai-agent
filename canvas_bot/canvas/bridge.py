@@ -17,10 +17,11 @@ from contextlib import asynccontextmanager
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# Read-only, student-facing subset of canvas-mcp's tools. The `get_my_*` tools
-# work across all courses with no arguments; the rest let the agent drill into
-# a specific course once it has an ID from list_courses.
-ALLOWED_TOOLS = {
+# Read-only subset of canvas-mcp's tools. The `get_my_*` tools work across all
+# courses with no arguments; the rest let the agent drill into a specific course
+# once it has an ID from list_courses. `list_discussion_*` back the write tools
+# below by resolving the topic_id / entry_id the agent needs to post or reply.
+READ_TOOLS = {
     "list_courses",
     "get_my_upcoming_assignments",
     "get_my_todo_items",
@@ -30,7 +31,21 @@ ALLOWED_TOOLS = {
     "list_announcements",
     "get_assignment_details",
     "get_syllabus",
+    "list_discussion_topics",
+    "list_discussion_entries",
 }
+
+# Mutating tools — these change Canvas (and other people see the result). The
+# agent's system prompt REQUIRES an explicit user confirmation before calling
+# any of these. Kept a small, deliberate MVP set (see docs/planning.md).
+WRITE_TOOLS = {
+    "create_announcement",
+    "create_discussion_topic",
+    "post_discussion_entry",
+    "reply_to_discussion_entry",
+}
+
+ALLOWED_TOOLS = READ_TOOLS | WRITE_TOOLS
 
 
 @asynccontextmanager

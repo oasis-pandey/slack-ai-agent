@@ -11,11 +11,12 @@ modal). Hackathon project (Slack Agent Builder Challenge, deadline Jul 13 2026).
 plan corrections — read it.
 
 Done (all merged to `main` via PRs #1–#3): Slack ↔ agent ↔ canvas-mcp end to end;
-clickable announcement modal; pytest suite (31 tests) + GitHub Actions CI; containerized
+clickable announcement modal; pytest suite + GitHub Actions CI; containerized
 (Dockerfile + `railway.json`), build run + validated locally against a real Canvas.
-**Next: write-to-Canvas features** (currently read-only) — start on a fresh branch off
-`main`. Note: Railway deploy config exists but the bot has only been run locally (Docker)
-so far, not yet deployed to the cloud.
+**In progress: write-to-Canvas features** (branch `canvas-write-mvp`). The agent can now
+create announcements/discussions and post/reply to discussions — behind a mandatory
+confirmation step (see below). Note: Railway deploy config exists but the bot has only
+been run locally (Docker) so far, not yet deployed to the cloud.
 
 ## What This Is
 
@@ -54,8 +55,10 @@ Standalone checks (no Slack), run from the repo root: `python -m scripts.canvas_
 Groq does **not** speak MCP natively. `canvas_bot/canvas/bridge.py` does two things: (a)
 an MCP **client** that spawns canvas-mcp over stdio and calls its tools, and (b) **schema
 translation** — MCP tool defs → Groq `tools` schema, and an MCP tool result → plain text.
-canvas-mcp exposes ~92 tools; we whitelist 9 read-only student tools (`ALLOWED_TOOLS`) to
-keep the prompt small and tool selection accurate.
+canvas-mcp exposes ~92 tools; we whitelist a small subset (`ALLOWED_TOOLS = READ_TOOLS |
+WRITE_TOOLS` in `bridge.py`) to keep the prompt small and tool selection accurate.
+`READ_TOOLS` (11) are non-mutating; `WRITE_TOOLS` (4) are `create_announcement`,
+`create_discussion_topic`, `post_discussion_entry`, `reply_to_discussion_entry`.
 
 ### Groq tool-call gotcha (caused real bugs)
 
@@ -147,7 +150,12 @@ rotate `SLACK_BOT_TOKEN` — update `.env` if so.
 
 ## Conventions
 
-- **Read-only.** If asked to write/modify Canvas, say writing isn't supported yet.
+- **Writes are limited + confirmed.** The only supported writes are the 4 in
+  `WRITE_TOOLS` (create announcement/discussion, post/reply to a discussion). Anything
+  else (submit assignment, grade, edit pages, delete) is unsupported — say so. The agent
+  MUST restate the action and get explicit user confirmation before calling any write tool
+  (enforced via the system prompt in `canvas_bot/agent.py`); it never writes on the first
+  request.
 - **Never fabricate Canvas data.** Real tool results only; empty → friendly message.
   Don't relabel unrelated courses to fill a subset answer. (Enforced via the system prompt
   in `canvas_bot/agent.py`.)

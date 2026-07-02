@@ -2,7 +2,13 @@
 
 from types import SimpleNamespace
 
-from canvas_bot.canvas.bridge import ALLOWED_TOOLS, result_to_text, to_groq_tools
+from canvas_bot.canvas.bridge import (
+    ALLOWED_TOOLS,
+    READ_TOOLS,
+    WRITE_TOOLS,
+    result_to_text,
+    to_groq_tools,
+)
 
 
 def _mcp_tool(name, description="", input_schema=None):
@@ -44,12 +50,27 @@ def test_to_groq_tools_handles_none_description():
     assert out[0]["function"]["description"] == ""
 
 
-def test_allowed_tools_are_read_only():
-    # Guard against accidentally whitelisting a mutating tool.
-    forbidden = ("create", "update", "delete", "submit", "post", "edit")
+def test_read_tools_are_non_mutating():
+    # Guard against a mutating tool sneaking into the read-only set.
+    forbidden = ("create", "update", "delete", "submit", "post", "edit", "reply")
     assert not any(
-        any(verb in name for verb in forbidden) for name in ALLOWED_TOOLS
+        any(verb in name for verb in forbidden) for name in READ_TOOLS
     )
+
+
+def test_write_tools_are_the_deliberate_mvp_set():
+    # Writes must be an explicit, reviewed allowlist — not accidental.
+    assert WRITE_TOOLS == {
+        "create_announcement",
+        "create_discussion_topic",
+        "post_discussion_entry",
+        "reply_to_discussion_entry",
+    }
+
+
+def test_allowed_tools_is_read_plus_write():
+    assert ALLOWED_TOOLS == READ_TOOLS | WRITE_TOOLS
+    assert READ_TOOLS.isdisjoint(WRITE_TOOLS)
 
 
 def test_result_to_text_joins_text_blocks():
