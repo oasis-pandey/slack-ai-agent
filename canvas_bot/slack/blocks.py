@@ -15,6 +15,10 @@ ACTION_VIEW_ANNOUNCEMENT = "view_announcement"
 SECTION_TEXT_LIMIT = 2900  # hard limit is 3000; leave room for the truncation note
 MODAL_TITLE_LIMIT = 24
 HEADER_TEXT_LIMIT = 150
+# Slack caps a message at 50 blocks. We use 1 header + 1 section per announcement
+# (+ an optional "showing N of M" note), and a 100+ item list is unreadable
+# anyway, so we render only the newest few and point users at narrowing the ask.
+MAX_LIST_ITEMS = 12
 
 
 def _fmt_date(iso: str | None) -> str:
@@ -72,20 +76,27 @@ def _truncate(s: str, limit: int) -> str:
 
 
 def announcement_list_blocks(records: list[dict]) -> list[dict]:
-    """A minimal header + one section-with-View-button per announcement."""
-    count = len(records)
+    """A minimal header + one section-with-View-button per announcement.
+
+    Renders only the newest `MAX_LIST_ITEMS` (Slack caps a message at 50 blocks,
+    and a 100-item list is unreadable regardless) — sorted newest-first, with a
+    footer noting how many were hidden and how to narrow the ask.
+    """
+    total = len(records)
+    # Newest first. posted_at is an ISO string (or None); "" sorts last, which
+    # is what we want for undated records.
+    ordered = sorted(records, key=lambda r: r.get("posted_at") or "", reverse=True)
+    shown = ordered[:MAX_LIST_ITEMS]
+
+    header = (
+        f"📢  *{total} announcements* — showing the {len(shown)} most recent"
+        if total > len(shown)
+        else f"📢  *{total} announcement{'' if total == 1 else 's'}*"
+    )
     blocks: list[dict] = [
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": f"📢  *{count} announcement{'' if count == 1 else 's'}*",
-                }
-            ],
-        }
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": header}]}
     ]
-    for r in records:
+    for r in shown:
         date = _fmt_date(r.get("posted_at"))
         meta = f"   ·   {date}" if date else ""
         blocks.append(
@@ -99,6 +110,19 @@ def announcement_list_blocks(records: list[dict]) -> list[dict]:
                     # "course_id:announcement_id" — small, re-fetched on click.
                     "value": f"{r['course_id']}:{r['id']}",
                 },
+            }
+        )
+    if total > len(shown):
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"_{total - len(shown)} more — ask about a specific "
+                        "course to see the rest._",
+                    }
+                ],
             }
         )
     return blocks

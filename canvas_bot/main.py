@@ -37,6 +37,17 @@ BOT_USER_ID = app.client.auth_test()["user_id"]
 # Hard ceiling on a single agent run, so a stuck loop can't hang forever.
 AGENT_TIMEOUT = 75
 
+# Slack rejects an over-long message body with `msg_too_long`. Keep any text we
+# post comfortably under the limit; a minimal answer is never near this anyway.
+SLACK_TEXT_LIMIT = 3800
+
+
+def _fit(text: str) -> str:
+    """Truncate `text` so Slack won't reject it with `msg_too_long`."""
+    if len(text) <= SLACK_TEXT_LIMIT:
+        return text
+    return text[:SLACK_TEXT_LIMIT].rstrip() + "\n\n…(truncated)"
+
 
 @app.event("app_mention")
 def handle_mention(event, client, say):
@@ -95,15 +106,38 @@ def handle_mention(event, client, say):
 
     # Rich path: clickable announcement list (each "View" opens a modal). `text`
     # is the notification/accessibility fallback shown when blocks render.
-    blocks = announcement_list_blocks(result.announcements) if result.announcements else None
-    text = result.text or ("Here are your announcements:" if blocks else "(no response)")
+    blocks = None
+    text = result.text or "(no response)"
+    if result.announcements:
+        try:
+            blocks = announcement_list_blocks(result.announcements)
+            # With blocks, `text` is only the notification preview — keep it short
+            # instead of echoing the model's (possibly huge) re-listing.
+            text = "📢 Your Canvas announcements"
+        except Exception:
+            # Never let a rendering error strand the "Checking Canvas…" placeholder;
+            # fall back to the plain-text answer the agent already produced.
+            logging.exception("failed to build announcement blocks")
+            blocks = None
+            text = result.text or "I found some announcements but couldn't format them."
 
-    if placeholder.get("ts"):
-        client.chat_update(
-            channel=event["channel"], ts=placeholder["ts"], text=text, blocks=blocks
-        )
-    else:
-        say(text=text, blocks=blocks, thread_ts=thread_ts)
+    # Posting can also fail (e.g. Slack rejects the blocks). Fall back to a bare
+    # text update so the placeholder always resolves to *something*.
+    text = _fit(text)
+    try:
+        if placeholder.get("ts"):
+            client.chat_update(
+                channel=event["channel"], ts=placeholder["ts"], text=text, blocks=blocks
+            )
+        else:
+            say(text=text, blocks=blocks, thread_ts=thread_ts)
+    except Exception:
+        logging.exception("failed to post answer (retrying without blocks)")
+        fallback = _fit(result.text or "Sorry — I couldn't post that answer. Try again?")
+        if placeholder.get("ts"):
+            client.chat_update(channel=event["channel"], ts=placeholder["ts"], text=fallback)
+        else:
+            say(text=fallback, thread_ts=thread_ts)
 
 
 @app.action(ACTION_VIEW_ANNOUNCEMENT)
