@@ -2,6 +2,7 @@
 
 from canvas_bot.slack.blocks import (
     ACTION_VIEW_ANNOUNCEMENT,
+    MAX_LIST_ITEMS,
     MODAL_TITLE_LIMIT,
     SECTION_TEXT_LIMIT,
     announcement_list_blocks,
@@ -76,6 +77,38 @@ def test_button_value_encodes_course_and_announcement_id():
     blocks = announcement_list_blocks([_rec(course_id="123", id=99)])
     btn = next(b["accessory"] for b in blocks if "accessory" in b)
     assert btn["value"] == "123:99"
+
+
+def test_large_list_is_capped_under_slack_block_limit():
+    # 112 records used to produce 113 blocks and Slack rejected the message.
+    records = [_rec(id=i, title=f"Announcement {i}") for i in range(112)]
+    blocks = announcement_list_blocks(records)
+    assert len(blocks) <= 50  # Slack's hard per-message block limit
+    sections = [b for b in blocks if b.get("type") == "section"]
+    assert len(sections) == MAX_LIST_ITEMS
+    # Header should tell the user the full count and that it's truncated.
+    assert "112" in blocks[0]["elements"][0]["text"]
+
+
+def test_list_is_sorted_newest_first():
+    records = [
+        _rec(id=1, title="Old", posted_at="2026-01-01T00:00:00Z"),
+        _rec(id=2, title="New", posted_at="2026-06-01T00:00:00Z"),
+        _rec(id=3, title="Mid", posted_at="2026-03-01T00:00:00Z"),
+    ]
+    titles = [
+        b["text"]["text"] for b in announcement_list_blocks(records)
+        if b.get("type") == "section"
+    ]
+    assert titles[0].startswith("*New*")
+    assert titles[-1].startswith("*Old*")
+
+
+def test_small_list_has_no_truncation_footer():
+    blocks = announcement_list_blocks([_rec(), _rec(id=100, title="Project 2")])
+    # Only the header context block, no trailing "N more" footer.
+    contexts = [b for b in blocks if b.get("type") == "context"]
+    assert len(contexts) == 1
 
 
 # --- announcement_modal_view ------------------------------------------------

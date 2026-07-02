@@ -328,6 +328,18 @@ Each tool:
   (e.g. clubs); "active enrollment" ≠ "current term class". Tighten later by
   filtering on term / excluding archived.
 
+### Announcement UI fix (Jul 2, 2026)
+- Bug: "what are the announcements" spans all courses → 112 records → 113 Block
+  Kit blocks, over Slack's **50-block-per-message** hard limit. `chat_update`
+  raised `invalid_blocks`; that call was **outside** `main.py`'s try/except, so
+  the "Checking Canvas…" placeholder was left dangling (looked frozen/broken).
+- Fixes: (a) `announcement_list_blocks` now sorts newest-first, renders only the
+  newest `MAX_LIST_ITEMS=12`, and appends an "N more — narrow the ask" footer;
+  (b) the render/post path in `main.py` is wrapped in try/except so a block or
+  Slack failure always falls back to a plain-text update — the placeholder can
+  never stay stuck again; (c) notification `text` for the blocks message is now
+  a short label, not the model's full (huge) re-listing.
+
 ### Corrections to the original plan (learned while building)
 - canvas-mcp speaks MCP over **stdio** — we spawn `canvas-mcp-server` as a
   subprocess and talk over its stdin/stdout (not a network port).
