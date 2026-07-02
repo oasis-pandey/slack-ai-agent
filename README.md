@@ -7,7 +7,9 @@ natural-language question about your Canvas — courses, assignments, to-dos, gr
 announcements, or syllabus — and a ReAct agent answers with real data pulled live from
 Canvas.
 
-Read-only, single-user MVP. Built for the Slack Agent Builder Challenge.
+Single-user MVP. Reads are the core; a small, confirmation-gated set of write actions
+(create announcements/discussions, post/reply, add a private to-do) is also supported.
+Built for the Slack Agent Builder Challenge.
 
 ```
 You:       @CanvasBot what's due this week?
@@ -35,7 +37,8 @@ canvas_bot/            application package
   main.py              Slack wiring + entry point (python -m canvas_bot.main)
   agent.py             ReAct loop
   canvas/bridge.py     Groq ↔ canvas-mcp bridge
-  canvas/rest.py       direct Canvas REST (structured announcements)
+  canvas/rest.py       direct Canvas REST (structured announcements, planner notes)
+  canvas/local_tools.py  non-MCP agent tools (private to-do / planner note)
   slack/helpers.py     dedupe + thread→history (pure)
   slack/blocks.py      Block Kit list & modal builders (pure)
 scripts/               standalone smoke checks (canvas_check, canvas_mcp_check)
@@ -59,8 +62,10 @@ docs/planning.md       milestone log & design decisions
 Groq doesn't speak MCP natively. `canvas/bridge.py` does two things: (a) acts as an MCP
 **client** that launches canvas-mcp and calls its tools, and (b) does **schema
 translation** — MCP tool definitions → Groq `tools` schema, and MCP tool results → plain
-text. canvas-mcp exposes ~92 tools; we whitelist **9 read-only student tools**
-(`ALLOWED_TOOLS`) to keep the prompt small and tool selection accurate.
+text. canvas-mcp exposes ~92 tools; we whitelist **15** in `ALLOWED_TOOLS` (11 read-only +
+4 write) to keep the prompt small and tool selection accurate, plus one local
+`create_planner_note` tool defined in `canvas/local_tools.py` (canvas-mcp has no planner
+write). Writes are covered in [Conventions](#conventions).
 
 ### Conversation memory = Slack
 
@@ -148,8 +153,11 @@ No public URL, database, or open port is required.
 
 ## Conventions
 
-- **Read-only.** If asked to write or modify Canvas, the bot says writing isn't
-  supported yet.
+- **Limited, confirmation-gated writes.** The only supported writes are creating an
+  announcement or discussion, posting/replying to a discussion, and adding a private
+  planner note (to-do). For the course-visible writes the bot restates the action and
+  waits for explicit confirmation before doing anything; the private to-do is created
+  directly. Anything else (submitting assignments, grading, deleting) is unsupported.
 - **Never fabricates Canvas data.** Real tool results only; empty results get a
   friendly message rather than invented data.
 
@@ -164,6 +172,7 @@ No public URL, database, or open port is required.
 
 ## Status
 
-Working MVP — Slack ↔ agent ↔ Canvas end to end, with a clickable announcement modal, a
-test suite + CI, and a containerized Railway deploy. Next up: write-to-Canvas features.
+Working MVP — Slack ↔ agent ↔ Canvas end to end, with a clickable announcement modal,
+confirmation-gated write actions, a test suite + CI, and a containerized Railway build.
+Next up: cloud deployment and the hackathon submission (demo + architecture diagram).
 See [`docs/planning.md`](docs/planning.md) for the full milestone log and design decisions.
