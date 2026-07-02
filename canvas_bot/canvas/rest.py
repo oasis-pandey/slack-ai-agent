@@ -58,3 +58,23 @@ def get_announcement(course_id, topic_id) -> dict:
     )
     resp.raise_for_status()
     return _shape(course_id, resp.json())
+
+
+def create_planner_note(title: str, details=None, todo_date=None) -> dict:
+    """Create a private planner note (a personal to-do) for the current user.
+
+    canvas-mcp doesn't wrap Canvas's planner notes, so we hit the REST API
+    directly. The note is visible only to the token's owner — no one else sees
+    it — which makes this the safest write to exercise end to end.
+    """
+    base, headers = _api()
+    payload: dict = {"title": title}
+    if details:
+        payload["details"] = details
+    if todo_date:
+        payload["todo_date"] = todo_date  # ISO 8601; without it the note has no date
+    resp = requests.post(
+        f"{base}/api/v1/planner_notes", headers=headers, json=payload, timeout=TIMEOUT
+    )
+    resp.raise_for_status()
+    return resp.json()

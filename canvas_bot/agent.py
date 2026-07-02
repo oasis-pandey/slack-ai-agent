@@ -21,6 +21,11 @@ from groq import BadRequestError, Groq, RateLimitError
 
 from .canvas import rest as canvas_rest
 from .canvas.bridge import canvas_session, result_to_text, to_groq_tools
+from .canvas.local_tools import (
+    LOCAL_TOOL_NAMES,
+    LOCAL_TOOL_SCHEMAS,
+    dispatch_local_tool,
+)
 
 load_dotenv()
 
@@ -66,15 +71,21 @@ course name or code. So always call `list_courses` FIRST, find the course the \
 user means, then call the course-specific tool with that course's numeric id. \
 If a course tool 404s or errors, don't keep retrying the same identifier — \
 re-check the id from `list_courses` or tell the user you couldn't find it.
-## Writing to Canvas (create announcements & discussions, post/reply)
-You CAN make a few changes in Canvas, but only these: create an announcement \
+## Writing to Canvas
+You CAN make a few changes in Canvas. Anything not listed here (submitting \
+assignments, grading, editing pages, deleting) is NOT supported — say so plainly.
+
+PRIVATE to-do (low-stakes, no confirmation needed): `create_planner_note` adds \
+a personal to-do to the user's own planner, visible ONLY to them. When the user \
+asks to add a reminder / to-do / planner item, just call it directly (pick a \
+sensible `todo_date` if they gave one) and then say what you added. No course, \
+no confirmation dance needed — it's private and reversible.
+
+COURSE-VISIBLE writes (confirmation MANDATORY): create an announcement \
 (`create_announcement`), start a discussion (`create_discussion_topic`), post a \
 new entry to a discussion (`post_discussion_entry`), and reply to a discussion \
-entry (`reply_to_discussion_entry`). Anything else (submitting assignments, \
-grading, editing pages, deleting) is NOT supported — say so plainly if asked.
-
-CONFIRMATION IS MANDATORY. A write is visible to other people and can't be \
-undone from here, so NEVER call a write tool on the user's first request. \
+entry (`reply_to_discussion_entry`). These are seen by other people and can't be \
+undone from here, so NEVER call one on the user's first request. \
 Instead: resolve the details (course via `list_courses`; for posting/replying, \
 find the topic via `list_discussion_topics` and the entry via \
 `list_discussion_entries`), then reply with a short summary of EXACTLY what you \
@@ -141,7 +152,8 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
     seen_announcements: set = set()
 
     async with canvas_session() as session:
-        tools = to_groq_tools((await session.list_tools()).tools)
+        # canvas-mcp tools + our local REST-backed tools (e.g. planner notes).
+        tools = to_groq_tools((await session.list_tools()).tools) + LOCAL_TOOL_SCHEMAS
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT.format(today=today)},
             *history,
@@ -234,11 +246,15 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                 except json.JSONDecodeError:
                     args = {}
                 try:
-                    result = await asyncio.wait_for(
-                        session.call_tool(tc.function.name, args),
-                        timeout=TOOL_TIMEOUT,
-                    )
-                    text = result_to_text(result)
+                    if tc.function.name in LOCAL_TOOL_NAMES:
+                        # Handled by us via direct Canvas REST, not canvas-mcp.
+                        text = dispatch_local_tool(tc.function.name, args)
+                    else:
+                        result = await asyncio.wait_for(
+                            session.call_tool(tc.function.name, args),
+                            timeout=TOOL_TIMEOUT,
+                        )
+                        text = result_to_text(result)
                 except asyncio.TimeoutError:
                     text = f"{tc.function.name} timed out after {TOOL_TIMEOUT}s."
                 except Exception as e:  # surface tool failures to the model

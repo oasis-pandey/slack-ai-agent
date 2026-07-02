@@ -321,6 +321,12 @@ Each tool:
   so the agent can resolve the `topic_id`/`entry_id` those writes need.
 - Skipped for MVP: `send_conversation` (needs resolving recipient user-IDs) and all
   submit/grade/module/page/delete tools.
+- Added a 5th write that canvas-mcp does NOT provide: `create_planner_note` (a *private*
+  personal to-do). canvas-mcp has no planner/calendar write, so it lives in
+  `canvas/local_tools.py` backed by `rest.py`; `agent.py` merges its schema into the Groq
+  tool list and routes the call locally. It's private + reversible, so it's created
+  directly (no confirmation) and is the safest write to test. Verified live (create +
+  delete round-trip).
 - Role note: this token is Student in 6 courses, TA in 1, Teacher in 2 — so the
   create-* tools only succeed in the TA/teacher courses; the agent surfaces the
   permission error rather than pretending success.

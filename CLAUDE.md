@@ -59,6 +59,9 @@ canvas-mcp exposes ~92 tools; we whitelist a small subset (`ALLOWED_TOOLS = READ
 WRITE_TOOLS` in `bridge.py`) to keep the prompt small and tool selection accurate.
 `READ_TOOLS` (11) are non-mutating; `WRITE_TOOLS` (4) are `create_announcement`,
 `create_discussion_topic`, `post_discussion_entry`, `reply_to_discussion_entry`.
+One more write, `create_planner_note` (a *private* to-do), isn't a canvas-mcp tool —
+canvas-mcp doesn't wrap planner notes, so it lives in `canvas/local_tools.py` (backed by
+`rest.py`) and `agent.py` merges its schema into the Groq tool list.
 
 ### Groq tool-call gotcha (caused real bugs)
 
@@ -150,12 +153,14 @@ rotate `SLACK_BOT_TOKEN` — update `.env` if so.
 
 ## Conventions
 
-- **Writes are limited + confirmed.** The only supported writes are the 4 in
-  `WRITE_TOOLS` (create announcement/discussion, post/reply to a discussion). Anything
-  else (submit assignment, grade, edit pages, delete) is unsupported — say so. The agent
-  MUST restate the action and get explicit user confirmation before calling any write tool
+- **Writes are limited + confirmed.** Supported writes: the 4 course-visible ones in
+  `WRITE_TOOLS` (create announcement/discussion, post/reply to a discussion) plus the
+  private `create_planner_note` (personal to-do). Anything else (submit assignment, grade,
+  edit pages, delete) is unsupported — say so. For the 4 course-visible writes the agent
+  MUST restate the action and get explicit user confirmation before calling the tool
   (enforced via the system prompt in `canvas_bot/agent.py`); it never writes on the first
-  request.
+  request. The planner note is private/reversible, so it's created directly (no
+  confirmation) — it's the safest write to test.
 - **Never fabricate Canvas data.** Real tool results only; empty → friendly message.
   Don't relabel unrelated courses to fill a subset answer. (Enforced via the system prompt
   in `canvas_bot/agent.py`.)
