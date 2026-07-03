@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 
 from canvas_bot.slack.blocks import (
+    ACTION_REFRESH_HOME,
     ACTION_REMIND_ASSIGNMENT,
     ACTION_VIEW_ANNOUNCEMENT,
     MAX_CARDS,
@@ -14,6 +15,7 @@ from canvas_bot.slack.blocks import (
     announcement_list_blocks,
     announcement_modal_view,
     assignment_card_blocks,
+    home_view,
     html_to_slack,
 )
 
@@ -182,6 +184,57 @@ def test_cards_sorted_soonest_due_first():
     ]
     assert "Soon" in titles[0]
     assert "NoDate" in titles[-1]  # undated sorts last
+
+
+# --- home_view (App Home dashboard) -----------------------------------------
+
+def _grade(course="CS.2318.001", grade="A", score=102.49):
+    return {"course": course, "grade": grade, "score": score}
+
+
+def test_home_view_is_a_home_surface_with_refresh():
+    view = home_view([_grade()], [], [], now=NOW)
+    assert view["type"] == "home"
+    btn = view["blocks"][0]["accessory"]
+    assert btn["action_id"] == ACTION_REFRESH_HOME
+
+
+def test_home_view_grades_render_with_letter_and_percent():
+    view = home_view([_grade(grade="A", score=92.98)], [], [], now=NOW)
+    text = " ".join(
+        b["text"]["text"] for b in view["blocks"] if b.get("type") == "section"
+    )
+    assert "CS.2318.001" in text
+    assert "A (93%)" in text  # score rounded
+
+
+def test_home_view_empty_due_soon_shows_friendly_state():
+    view = home_view([_grade()], [], [], now=NOW)
+    ctx = " ".join(
+        e["text"]
+        for b in view["blocks"]
+        if b.get("type") == "context"
+        for e in b["elements"]
+    )
+    assert "Nothing due" in ctx
+
+
+def test_home_view_shows_assignment_cards_when_present():
+    view = home_view([], [_asg()], [], now=NOW)
+    remind = [
+        b for b in view["blocks"]
+        if b.get("type") == "section"
+        and b.get("accessory", {}).get("action_id") == ACTION_REMIND_ASSIGNMENT
+    ]
+    assert len(remind) == 1  # the assignment card, reused from the message list
+
+
+def test_home_view_todos_section_only_when_present():
+    without = home_view([_grade()], [], [], now=NOW)
+    with_todos = home_view([_grade()], [], [{"title": "Read ch. 5", "course": "ENG202"}], now=NOW)
+    headers_without = [b for b in without["blocks"] if b.get("type") == "header"]
+    headers_with = [b for b in with_todos["blocks"] if b.get("type") == "header"]
+    assert len(headers_with) == len(headers_without) + 1  # adds the "To-dos" header
 
 
 # --- announcement_modal_view ------------------------------------------------

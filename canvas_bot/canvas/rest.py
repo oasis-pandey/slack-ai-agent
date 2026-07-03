@@ -141,6 +141,48 @@ def list_upcoming_assignments(days: int = UPCOMING_DAYS) -> list[dict]:
     return out
 
 
+def list_current_grades() -> list[dict]:
+    """Return current grade per active student course, for the Home dashboard."""
+    base, headers = _api()
+    resp = requests.get(
+        f"{base}/api/v1/courses",
+        headers=headers,
+        params={"enrollment_state": "active", "include[]": "total_scores", "per_page": 100},
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    out: list[dict] = []
+    for c in resp.json():
+        if not isinstance(c, dict):
+            continue
+        for e in c.get("enrollments") or []:
+            if e.get("type") == "student":
+                score, grade = e.get("computed_current_score"), e.get("computed_current_grade")
+                if score is not None or grade:
+                    out.append({"course": c.get("name") or "(course)", "grade": grade, "score": score})
+                break
+    return out
+
+
+def list_todo() -> list[dict]:
+    """Return the user's Canvas to-do items (structured), for the Home dashboard."""
+    base, headers = _api()
+    resp = requests.get(f"{base}/api/v1/users/self/todo", headers=headers, timeout=TIMEOUT)
+    resp.raise_for_status()
+    out: list[dict] = []
+    for t in resp.json():
+        a = t.get("assignment") or {}
+        out.append(
+            {
+                "title": a.get("name") or t.get("context_name") or "To-do",
+                "course": t.get("context_name") or "",
+                "due_at": a.get("due_at"),
+                "html_url": t.get("html_url") or a.get("html_url"),
+            }
+        )
+    return out
+
+
 def create_planner_note(title: str, details=None, todo_date=None) -> dict:
     """Create a private planner note (a personal to-do) for the current user.
 
