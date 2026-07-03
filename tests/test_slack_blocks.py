@@ -1,12 +1,19 @@
 """Tests for the pure announcement Block Kit builders."""
 
+import json
+from datetime import datetime
+
 from canvas_bot.slack.blocks import (
+    ACTION_REMIND_ASSIGNMENT,
     ACTION_VIEW_ANNOUNCEMENT,
+    MAX_CARDS,
     MAX_LIST_ITEMS,
     MODAL_TITLE_LIMIT,
     SECTION_TEXT_LIMIT,
+    _due_meta,
     announcement_list_blocks,
     announcement_modal_view,
+    assignment_card_blocks,
     html_to_slack,
 )
 
@@ -109,6 +116,72 @@ def test_small_list_has_no_truncation_footer():
     # Only the header context block, no trailing "N more" footer.
     contexts = [b for b in blocks if b.get("type") == "context"]
     assert len(contexts) == 1
+
+
+# --- assignment_card_blocks -------------------------------------------------
+
+def _asg(**kw):
+    base = {
+        "course": "CS301",
+        "course_id": "1",
+        "id": 9,
+        "title": "Homework 3",
+        "due_at": "2026-07-03T23:59:00Z",
+        "html_url": "https://c/courses/1/assignments/9",
+    }
+    base.update(kw)
+    return base
+
+
+NOW = datetime(2026, 7, 3, 9, 0, 0)
+
+
+def test_due_meta_urgency_buckets():
+    assert _due_meta("2026-07-03T23:59:00", NOW)[0] == "🔴"   # today
+    assert _due_meta("2026-07-06T12:00:00", NOW)[0] == "🟡"   # within a week
+    assert _due_meta("2026-07-20T12:00:00", NOW)[0] == "🟢"   # later
+    assert _due_meta("2026-06-30T12:00:00", NOW)[0] == "⚪"   # past
+    assert _due_meta(None, NOW) == ("", "no due date")
+
+
+def test_card_has_remind_button_with_title_and_due():
+    blocks = assignment_card_blocks([_asg()], now=NOW)
+    section = next(b for b in blocks if b.get("type") == "section")
+    btn = section["accessory"]
+    assert btn["action_id"] == ACTION_REMIND_ASSIGNMENT
+    payload = json.loads(btn["value"])
+    assert payload["t"] == "Homework 3"
+    assert payload["d"] == "2026-07-03T23:59:00Z"
+
+
+def test_card_includes_open_in_canvas_link_and_course():
+    blocks = assignment_card_blocks([_asg()], now=NOW)
+    text = next(b for b in blocks if b.get("type") == "section")["text"]["text"]
+    assert "CS301" in text
+    assert "<https://c/courses/1/assignments/9|Open in Canvas>" in text
+
+
+def test_cards_capped_and_under_block_limit():
+    records = [_asg(id=i, title=f"A{i}") for i in range(20)]
+    blocks = assignment_card_blocks(records, now=NOW)
+    assert len(blocks) <= 50
+    sections = [b for b in blocks if b.get("type") == "section"]
+    assert len(sections) == MAX_CARDS
+    assert "20 assignments" in blocks[0]["elements"][0]["text"]
+
+
+def test_cards_sorted_soonest_due_first():
+    records = [
+        _asg(id=1, title="Later", due_at="2026-07-20T12:00:00Z"),
+        _asg(id=2, title="Soon", due_at="2026-07-04T12:00:00Z"),
+        _asg(id=3, title="NoDate", due_at=None),
+    ]
+    titles = [
+        b["text"]["text"] for b in assignment_card_blocks(records, now=NOW)
+        if b.get("type") == "section"
+    ]
+    assert "Soon" in titles[0]
+    assert "NoDate" in titles[-1]  # undated sorts last
 
 
 # --- announcement_modal_view ------------------------------------------------
