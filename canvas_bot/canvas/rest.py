@@ -149,11 +149,14 @@ def create_planner_note(title: str, details=None, todo_date=None) -> dict:
     it — which makes this the safest write to exercise end to end.
     """
     base, headers = _api()
-    payload: dict = {"title": title}
+    # Canvas rejects a planner note with a blank todo_date (400), so default to
+    # today when the caller has none (e.g. an assignment with no due date).
+    payload: dict = {
+        "title": title,
+        "todo_date": todo_date or datetime.date.today().isoformat(),
+    }
     if details:
         payload["details"] = details
-    if todo_date:
-        payload["todo_date"] = todo_date  # ISO 8601; without it the note has no date
     resp = requests.post(
         f"{base}/api/v1/planner_notes", headers=headers, json=payload, timeout=TIMEOUT
     )
