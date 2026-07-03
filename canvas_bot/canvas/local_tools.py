@@ -40,7 +40,7 @@ LOCAL_TOOL_SCHEMAS = [
                         "description": (
                             "Optional date (or datetime) the to-do is for, in ISO "
                             "8601, e.g. '2026-07-05' or '2026-07-05T17:00:00Z'. "
-                            "Without it the note has no date on the planner."
+                            "Defaults to today if omitted."
                         ),
                     },
                 },

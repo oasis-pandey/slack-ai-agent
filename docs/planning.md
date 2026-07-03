@@ -9,6 +9,11 @@ and it reads the data and responds — all from inside Slack.
 Hackathon: Slack Agent Builder Challenge (deadline Jul 13, 2026)
 Track: New Slack Agent (MCP server integration)
 
+> **Note:** this doc is the dated planning/decision log — earlier sections describe the
+> original plan (e.g. flat `app.py` / `canvas_tools.py`), which was later reorganized into
+> the `canvas_bot/` package (`app.py`→`main.py`, `canvas_tools.py`→`canvas/bridge.py`).
+> For the **current** file layout and tool set, see `README.md` and `CLAUDE.md`.
+
 ---
 
 ## Tech Stack (Decided)
@@ -23,7 +28,7 @@ Track: New Slack Agent (MCP server integration)
 
 ### The Groq ↔ MCP Bridge
 Groq does **not** natively speak MCP. We need a small manual bridge
-(~30 lines, in `canvas_tools.py`) that reads canvas-mcp's tool definitions and
+(now `canvas_bot/canvas/bridge.py`) that reads canvas-mcp's tool definitions and
 reformats them into Groq's tool-calling schema (same shape as OpenAI function
 calling), then routes Groq's tool-call requests back to canvas-mcp. canvas-mcp
 runs as a local server alongside the Slack bot on the same machine/instance.
@@ -261,13 +266,18 @@ Each tool:
 
 ## Files to Write
 
-| File              | Purpose                                                   |
-|-------------------|-----------------------------------------------------------|
-| `app.py`          | Slack listener (Bolt, Socket Mode) — handles `app_mention` |
-| `agent.py`        | ReAct loop using Groq + Llama 3.3 70B                      |
-| `canvas_tools.py` | Bridge between Groq tool calling and canvas-mcp            |
-| `.env`            | Secrets (Canvas token + URL, Slack tokens, Groq key)      |
-| `requirements.txt`| Dependencies                                              |
+*(As built — the flat plan below was reorganized into the `canvas_bot/` package.)*
+
+| File                        | Purpose                                                   |
+|-----------------------------|-----------------------------------------------------------|
+| `canvas_bot/main.py`        | Slack listener (Bolt, Socket Mode) — handles `app_mention` + modal |
+| `canvas_bot/agent.py`       | ReAct loop using Groq + Llama 3.3 70B                     |
+| `canvas_bot/canvas/bridge.py`     | Bridge between Groq tool calling and canvas-mcp     |
+| `canvas_bot/canvas/rest.py`       | Direct Canvas REST (announcements, planner notes)   |
+| `canvas_bot/canvas/local_tools.py`| Non-MCP tools (private planner note)                |
+| `canvas_bot/slack/{helpers,blocks}.py` | Pure Slack logic (dedupe, history, Block Kit)  |
+| `.env`                      | Secrets (Canvas token + URL, Slack tokens, Groq key)     |
+| `requirements.txt`          | Dependencies                                             |
 
 ---
 

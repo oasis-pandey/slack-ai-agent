@@ -117,6 +117,7 @@ class AgentResult:
 
     text: str
     announcements: list = field(default_factory=list)
+    assignments: list = field(default_factory=list)
 
 
 def _tool_use_failed_detail(err: BadRequestError):
@@ -150,6 +151,8 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
     notified = False
     announcements: list = []
     seen_announcements: set = set()
+    assignments: list = []
+    seen_assignments: set = set()
 
     async with canvas_session() as session:
         # canvas-mcp tools + our local REST-backed tools (e.g. planner notes).
@@ -180,6 +183,7 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                         "Give it a few minutes and ask again. 🙏"
                     ),
                     announcements=announcements,
+                    assignments=assignments,
                 )
             except BadRequestError as e:
                 # Groq validates the model's tool-call arguments against the
@@ -211,6 +215,7 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                 return AgentResult(
                     text=msg.content or "(I didn't produce a response.)",
                     announcements=announcements,
+                    assignments=assignments,
                 )
 
             # First time we actually reach for Canvas, let the caller know.
@@ -276,6 +281,27 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                         except Exception:
                             pass
 
+                # Same idea for assignments -> interactive cards. "Upcoming"
+                # spans all courses (planner); "list_assignments" is one course.
+                if tc.function.name in ("get_my_upcoming_assignments", "list_assignments"):
+                    try:
+                        if tc.function.name == "get_my_upcoming_assignments":
+                            recs = canvas_rest.list_upcoming_assignments()
+                        else:
+                            cid = args.get("course_identifier")
+                            recs = (
+                                canvas_rest.list_course_assignments(cid)
+                                if cid is not None
+                                else []
+                            )
+                        for rec in recs:
+                            key = (rec["course_id"], rec["id"])
+                            if key not in seen_assignments:
+                                seen_assignments.add(key)
+                                assignments.append(rec)
+                    except Exception:
+                        pass
+
                 messages.append(
                     {
                         "role": "tool",
@@ -291,6 +317,7 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                 "something more specific."
             ),
             announcements=announcements,
+            assignments=assignments,
         )
 
 

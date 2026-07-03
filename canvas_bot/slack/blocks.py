@@ -5,11 +5,14 @@ testable. `main.py` renders these; the interactivity handler opens the modal.
 """
 
 import html as _html
+import json
 import re
 from datetime import datetime
 
-# action_id shared between the "View" button and main.py's @app.action handler.
+# action_ids shared between the buttons here and main.py's @app.action handlers.
 ACTION_VIEW_ANNOUNCEMENT = "view_announcement"
+ACTION_REMIND_ASSIGNMENT = "remind_assignment"
+ACTION_REFRESH_HOME = "refresh_home"
 
 # Slack limits we have to respect.
 SECTION_TEXT_LIMIT = 2900  # hard limit is 3000; leave room for the truncation note
@@ -19,6 +22,14 @@ HEADER_TEXT_LIMIT = 150
 # (+ an optional "showing N of M" note), and a 100+ item list is unreadable
 # anyway, so we render only the newest few and point users at narrowing the ask.
 MAX_LIST_ITEMS = 12
+# One section per assignment card; keep well under the 50-block cap.
+MAX_CARDS = 10
+# Cap the button payload — Slack action `value` is limited to 2000 chars.
+REMIND_TITLE_LIMIT = 180
+# App Home dashboard section caps.
+HOME_DUE_LIMIT = 5
+HOME_GRADES_LIMIT = 8
+HOME_TODO_LIMIT = 5
 
 
 def _fmt_date(iso: str | None) -> str:
@@ -126,6 +137,157 @@ def announcement_list_blocks(records: list[dict]) -> list[dict]:
             }
         )
     return blocks
+
+
+def _due_meta(due_iso: str | None, now: datetime) -> tuple[str, str]:
+    """Return (urgency_emoji, friendly_due_text) for an assignment due date.
+
+    🔴 due today · 🟡 within a week · 🟢 later · ⚪ already past · '' if no/parse-fail.
+    """
+    if not due_iso:
+        return "", "no due date"
+    try:
+        due = datetime.strptime(due_iso[:19], "%Y-%m-%dT%H:%M:%S")
+    except (ValueError, TypeError):
+        return "", ""
+    time = due.strftime("%I:%M%p").lstrip("0").lower()  # '11:59pm'
+    days = (due.date() - now.date()).days
+    if days < 0:
+        return "⚪", f"was due {due.strftime('%b %d')}"
+    if days == 0:
+        return "🔴", f"due today {time}"
+    if days <= 7:
+        return "🟡", f"due {due.strftime('%a %b %d')}"
+    return "🟢", f"due {due.strftime('%b %d')}"
+
+
+def _remind_value(record: dict) -> str:
+    """Compact JSON payload for the 'Remind me' button (title + due date)."""
+    return json.dumps(
+        {"t": _truncate(record.get("title") or "To-do", REMIND_TITLE_LIMIT),
+         "d": record.get("due_at") or ""}
+    )
+
+
+def _assignment_card(record: dict, now: datetime) -> dict:
+    """One assignment as a section: urgency + course + due + Open link, with a
+    '⏰ Remind me' button. Shared by the message list and the Home dashboard."""
+    emoji, due = _due_meta(record.get("due_at"), now)
+    title = record.get("title") or "(untitled)"
+    head = f"{emoji}  *{title}*" if emoji else f"*{title}*"
+    ctx = [b for b in (record.get("course"), due) if b]
+    if record.get("html_url"):
+        ctx.append(f"<{record['html_url']}|Open in Canvas>")
+    text = head + (("\n" + "  ·  ".join(ctx)) if ctx else "")
+    return {
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": text},
+        "accessory": {
+            "type": "button",
+            "text": {"type": "plain_text", "text": "⏰ Remind me"},
+            "action_id": ACTION_REMIND_ASSIGNMENT,
+            "value": _remind_value(record),
+        },
+    }
+
+
+def assignment_card_blocks(records: list[dict], now: datetime | None = None) -> list[dict]:
+    """Render assignments as interactive cards: urgency + course + due, an
+    'Open in Canvas' link, and a '⏰ Remind me' button that creates a to-do.
+
+    Sorted soonest-due first (undated last), capped at MAX_CARDS. `now` is
+    injectable so the urgency logic is deterministically testable.
+    """
+    now = now or datetime.now()
+    total = len(records)
+    # Soonest due first; missing due dates sort last.
+    ordered = sorted(records, key=lambda r: r.get("due_at") or "9999", reverse=False)
+    shown = ordered[:MAX_CARDS]
+
+    header = (
+        f"📋  *{total} assignments* — showing the {len(shown)} soonest"
+        if total > len(shown)
+        else f"📋  *{total} assignment{'' if total == 1 else 's'}*"
+    )
+    blocks: list[dict] = [
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": header}]}
+    ]
+    blocks.extend(_assignment_card(r, now) for r in shown)
+    return blocks
+
+
+def _grade_line(g: dict) -> str:
+    """'• *CS.2318.001* — A (102%)' from a grade record."""
+    grade, score = g.get("grade"), g.get("score")
+    pct = f"{round(score)}%" if isinstance(score, (int, float)) else None
+    if grade and pct:
+        val = f"{grade} ({pct})"
+    else:
+        val = grade or pct or "—"
+    return f"• *{g.get('course') or 'Course'}* — {val}"
+
+
+def _header(text: str) -> dict:
+    return {"type": "header", "text": {"type": "plain_text", "text": text}}
+
+
+def _context(text: str) -> dict:
+    return {"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}
+
+
+def home_view(
+    grades: list[dict],
+    assignments: list[dict],
+    todos: list[dict],
+    now: datetime | None = None,
+) -> dict:
+    """Build the App Home dashboard view (Due soon · Grades · To-dos).
+
+    Pure: takes already-fetched data + an injectable `now`, returns a Slack
+    `views.publish` view dict. Empty sections show a friendly state.
+    """
+    now = now or datetime.now()
+    blocks: list[dict] = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*📚 Your Canvas Dashboard*\n_{now.strftime('%A, %b %d')}_",
+            },
+            "accessory": {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "🔄 Refresh"},
+                "action_id": ACTION_REFRESH_HOME,
+            },
+        },
+        {"type": "divider"},
+        _header("📋 Due soon"),
+    ]
+    if assignments:
+        ordered = sorted(assignments, key=lambda r: r.get("due_at") or "9999")
+        blocks.extend(_assignment_card(r, now) for r in ordered[:HOME_DUE_LIMIT])
+    else:
+        blocks.append(_context("🎉 Nothing due in the next two weeks."))
+
+    blocks.append({"type": "divider"})
+    blocks.append(_header("📊 Grades"))
+    if grades:
+        lines = "\n".join(_grade_line(g) for g in grades[:HOME_GRADES_LIMIT])
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": lines}})
+    else:
+        blocks.append(_context("No grades posted yet."))
+
+    if todos:
+        blocks.append({"type": "divider"})
+        blocks.append(_header("✅ To-dos"))
+        lines = "\n".join(
+            f"• {t.get('title') or 'To-do'}"
+            + (f" — _{t['course']}_" if t.get("course") else "")
+            for t in todos[:HOME_TODO_LIMIT]
+        )
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": lines}})
+
+    return {"type": "home", "blocks": blocks}
 
 
 def announcement_modal_view(announcement: dict) -> dict:

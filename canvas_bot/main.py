@@ -5,8 +5,10 @@ and post the answer back in the same thread.
 """
 
 import asyncio
+import json
 import logging
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 from slack_bolt import App
@@ -15,9 +17,13 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from .agent import AgentResult, run_agent
 from .canvas import rest as canvas_rest
 from .slack.blocks import (
+    ACTION_REFRESH_HOME,
+    ACTION_REMIND_ASSIGNMENT,
     ACTION_VIEW_ANNOUNCEMENT,
     announcement_list_blocks,
     announcement_modal_view,
+    assignment_card_blocks,
+    home_view,
 )
 from .slack.helpers import (
     MENTION_RE,
@@ -104,8 +110,8 @@ def handle_mention(event, client, say):
         logging.exception("agent failed")
         result = AgentResult("Something went wrong reaching Canvas. Try again in a moment.")
 
-    # Rich path: clickable announcement list (each "View" opens a modal). `text`
-    # is the notification/accessibility fallback shown when blocks render.
+    # Rich path: clickable announcement list or interactive assignment cards.
+    # `text` is the notification/accessibility fallback shown when blocks render.
     blocks = None
     text = result.text or "(no response)"
     if result.announcements:
@@ -120,6 +126,14 @@ def handle_mention(event, client, say):
             logging.exception("failed to build announcement blocks")
             blocks = None
             text = result.text or "I found some announcements but couldn't format them."
+    elif result.assignments:
+        try:
+            blocks = assignment_card_blocks(result.assignments)
+            text = "📋 Your Canvas assignments"
+        except Exception:
+            logging.exception("failed to build assignment cards")
+            blocks = None
+            text = result.text or "I found some assignments but couldn't format them."
 
     # Posting can also fail (e.g. Slack rejects the blocks). Fall back to a bare
     # text update so the placeholder always resolves to *something*.
@@ -157,6 +171,79 @@ def handle_view_announcement(ack, body, client, logger):
         )
     except Exception:
         logger.exception("failed to open announcement modal")
+
+
+@app.action(ACTION_REMIND_ASSIGNMENT)
+def handle_remind_assignment(ack, body, client, logger):
+    """Create a private planner note (to-do) when '⏰ Remind me' is clicked.
+
+    The button's value carries the assignment title + due date; we turn that
+    into a Canvas planner note and confirm privately (ephemeral) to the clicker.
+    """
+    ack()
+    try:
+        payload = json.loads(body["actions"][0]["value"])
+        title = payload.get("t") or "To-do"
+        due = payload.get("d") or None
+        canvas_rest.create_planner_note(title=f"📌 {title}", todo_date=due)
+        client.chat_postEphemeral(
+            channel=body["channel"]["id"],
+            user=body["user"]["id"],
+            text=f"⏰ Added to your Canvas to-do: *{title}*",
+        )
+    except Exception:
+        logger.exception("failed to create reminder planner note")
+        try:
+            client.chat_postEphemeral(
+                channel=body["channel"]["id"],
+                user=body["user"]["id"],
+                text="Couldn't add that reminder — try again in a moment.",
+            )
+        except Exception:
+            pass
+
+
+def _build_home_view() -> dict:
+    """Assemble the App Home dashboard from live Canvas data (via REST).
+
+    Each source is fetched independently so one failure just leaves that
+    section empty rather than blanking the whole dashboard.
+    """
+    grades, assignments, todos = [], [], []
+    try:
+        grades = canvas_rest.list_current_grades()
+    except Exception:
+        logging.exception("home: failed to load grades")
+    try:
+        assignments = canvas_rest.list_upcoming_assignments()
+    except Exception:
+        logging.exception("home: failed to load upcoming assignments")
+    try:
+        todos = canvas_rest.list_todo()
+    except Exception:
+        logging.exception("home: failed to load to-dos")
+    return home_view(grades, assignments, todos, now=datetime.now())
+
+
+@app.event("app_home_opened")
+def handle_home_opened(event, client, logger):
+    """Publish the Canvas dashboard when the user opens the bot's Home tab."""
+    if event.get("tab") != "home":
+        return  # also fires for the Messages tab — ignore that
+    try:
+        client.views_publish(user_id=event["user"], view=_build_home_view())
+    except Exception:
+        logger.exception("failed to publish home view")
+
+
+@app.action(ACTION_REFRESH_HOME)
+def handle_refresh_home(ack, body, client, logger):
+    """Re-publish the dashboard when '🔄 Refresh' is clicked."""
+    ack()
+    try:
+        client.views_publish(user_id=body["user"]["id"], view=_build_home_view())
+    except Exception:
+        logger.exception("failed to refresh home view")
 
 
 if __name__ == "__main__":
