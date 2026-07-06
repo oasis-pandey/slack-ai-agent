@@ -139,8 +139,31 @@ def handle_mention(event, client, say):
     # Plain chat ("hey") never triggers this, so it just gets a direct reply.
     placeholder = {}
 
-    def notify_canvas():
-        placeholder["ts"] = say(text=WORKING_MSG, thread_ts=thread_ts)["ts"]
+    def notify_canvas(tool_name: str):
+        tool_msgs = {
+            "list_courses": "Finding your courses",
+            "list_upcoming_assignments": "Checking due dates",
+            "get_course_details": "Reading course details",
+            "get_assignment_details": "Reading assignment details",
+            "list_recent_announcements": "Checking for announcements",
+            "list_current_grades": "Fetching your grades",
+            "list_todo": "Checking your to-do list",
+            "create_announcement": "Drafting announcement",
+        }
+        msg = tool_msgs.get(tool_name, "Checking Canvas")
+        text = WORKING_MSG + f" ({msg}…)"
+        
+        try:
+            if "ts" not in placeholder:
+                placeholder["ts"] = say(text=text, thread_ts=thread_ts)["ts"]
+            else:
+                app.client.chat_update(
+                    channel=body["event"]["channel"],
+                    ts=placeholder["ts"],
+                    text=text
+                )
+        except Exception:
+            pass
 
     try:
         # run_agent is async; each mention gets its own short-lived event loop.

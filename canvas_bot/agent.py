@@ -15,9 +15,11 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
+from typing import Callable
 
 from dotenv import load_dotenv
 from groq import BadRequestError, Groq, RateLimitError
+from .store import CanvasCreds
 
 from .canvas import rest as canvas_rest
 from .canvas.bridge import canvas_session, result_to_text, to_groq_tools
@@ -149,7 +151,11 @@ def _tool_use_failed_detail(err: BadRequestError):
     return None
 
 
-async def run_agent(history: list[dict], creds, on_tool_call=None) -> AgentResult:
+async def run_agent(
+    history: list[dict],
+    creds: CanvasCreds,
+    on_tool_call: Callable[[str], None] | None = None,
+) -> AgentResult:
     """Run the ReAct loop over a conversation and return an AgentResult.
 
     `history` is a list of {"role": "user"|"assistant", "content": str} in
@@ -157,9 +163,8 @@ async def run_agent(history: list[dict], creds, on_tool_call=None) -> AgentResul
     the whole thread gives the agent the context to handle follow-ups like
     "those are CS courses".
 
-    `on_tool_call`, if given, is called once (with no args) the first time the
-    agent decides to hit Canvas — so the caller can show a "Checking Canvas…"
-    notice only when it's actually warranted, not for plain chat.
+    `on_tool_call`, if given, is called once per tool call (with the tool name)
+    the moment the agent decides to hit Canvas.
 
     When the model fetches announcements, we also pull structured records (via
     Canvas REST) so the Slack layer can render them as clickable blocks; they
@@ -167,7 +172,6 @@ async def run_agent(history: list[dict], creds, on_tool_call=None) -> AgentResul
     """
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
     today = datetime.date.today().strftime("%A, %B %d, %Y")
-    notified = False
     announcements: list = []
     seen_announcements: set = set()
     assignments: list = []
@@ -237,14 +241,6 @@ async def run_agent(history: list[dict], creds, on_tool_call=None) -> AgentResul
                     assignments=assignments,
                 )
 
-            # First time we actually reach for Canvas, let the caller know.
-            if on_tool_call and not notified:
-                notified = True
-                try:
-                    on_tool_call()
-                except Exception:  # a notification failure must not break the run
-                    pass
-
             # Record the assistant's tool-call turn, then execute each call.
             messages.append(
                 {
@@ -265,6 +261,13 @@ async def run_agent(history: list[dict], creds, on_tool_call=None) -> AgentResul
             )
 
             for tc in msg.tool_calls:
+                if on_tool_call:
+                    try:
+                        on_tool_call(tc.function.name)
+                    except Exception:
+                        pass
+                logger.info("Agent tool call: %s(%s)", tc.function.name, tc.function.arguments)
+
                 try:
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
