@@ -26,6 +26,14 @@ def _api(creds):
     return base, {"Authorization": f"Bearer {token}"}
 
 
+def validate_creds(creds) -> str:
+    """Validate credentials and return the user's name."""
+    base, headers = _api(creds)
+    resp = requests.get(f"{base}/api/v1/users/self/profile", headers=headers, timeout=TIMEOUT)
+    resp.raise_for_status()
+    return resp.json().get("name") or "User"
+
+
 def _shape(course_id, a: dict) -> dict:
     """Normalize a Canvas discussion_topic payload to the fields we use."""
     return {

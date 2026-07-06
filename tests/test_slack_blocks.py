@@ -9,6 +9,8 @@ from canvas_bot.slack.blocks import (
     ACTION_VIEW_ANNOUNCEMENT,
     ACTION_CONFIRM_WRITE,
     ACTION_CANCEL_WRITE,
+    ACTION_CONNECT_CANVAS,
+    CALLBACK_CONNECT_MODAL,
     MAX_CARDS,
     MAX_LIST_ITEMS,
     MODAL_TITLE_LIMIT,
@@ -18,6 +20,8 @@ from canvas_bot.slack.blocks import (
     announcement_modal_view,
     assignment_card_blocks,
     write_confirmation_blocks,
+    connect_prompt_blocks,
+    connect_modal_view,
     home_view,
     html_to_slack,
 )
@@ -296,3 +300,25 @@ def test_write_confirmation_blocks_has_summary_and_buttons():
     payload = json.loads(confirm_btn["value"])
     assert payload["tool_name"] == tool_name
     assert payload["args"] == args
+
+
+# --- connect_prompt_blocks / connect_modal_view ----------------------------
+
+def test_connect_prompt_blocks_has_connect_button():
+    blocks = connect_prompt_blocks()
+    actions = next(b for b in blocks if b["type"] == "actions")
+    btn = actions["elements"][0]
+    assert btn["action_id"] == ACTION_CONNECT_CANVAS
+
+
+def test_connect_modal_view_has_url_and_token_inputs():
+    view = connect_modal_view()
+    assert view["type"] == "modal"
+    assert view["callback_id"] == CALLBACK_CONNECT_MODAL
+    
+    inputs = [b for b in view["blocks"] if b["type"] == "input"]
+    assert len(inputs) == 2
+    
+    action_ids = [i["element"]["action_id"] for i in inputs]
+    assert "url_input" in action_ids
+    assert "token_input" in action_ids

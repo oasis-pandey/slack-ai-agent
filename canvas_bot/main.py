@@ -17,17 +17,22 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from .agent import AgentResult, run_agent
 from .canvas import bridge
 from .canvas import rest as canvas_rest
-from .store import get_creds as get_store_creds, CanvasCreds
+from .store import get_creds as get_store_creds, set_creds as set_store_creds, delete_creds as delete_store_creds, CanvasCreds
 from .slack.blocks import (
     ACTION_REFRESH_HOME,
     ACTION_REMIND_ASSIGNMENT,
     ACTION_VIEW_ANNOUNCEMENT,
     ACTION_CONFIRM_WRITE,
     ACTION_CANCEL_WRITE,
+    ACTION_CONNECT_CANVAS,
+    ACTION_DISCONNECT_CANVAS,
+    CALLBACK_CONNECT_MODAL,
     announcement_list_blocks,
     announcement_modal_view,
     assignment_card_blocks,
     write_confirmation_blocks,
+    connect_prompt_blocks,
+    connect_modal_view,
     home_view,
 )
 from .slack.helpers import (
@@ -94,7 +99,7 @@ def handle_mention(event, client, say):
     user_id = event.get("user")
     creds = _get_user_creds(user_id) if user_id else None
     if not creds:
-        say(text="Please connect your Canvas account first.", thread_ts=thread_ts)
+        say(blocks=connect_prompt_blocks(), text="Please connect Canvas.", thread_ts=thread_ts)
         return
 
     # Try to read the thread for multi-turn context. If we lack the history
@@ -322,11 +327,60 @@ def handle_home_opened(event, client, logger):
         return  # also fires for the Messages tab — ignore that
     creds = _get_user_creds(event["user"])
     if not creds:
+        try:
+            client.views_publish(user_id=event["user"], view={"type": "home", "blocks": connect_prompt_blocks()})
+        except Exception:
+            logger.exception("failed to publish connect prompt view")
         return
     try:
         client.views_publish(user_id=event["user"], view=_build_home_view(creds))
     except Exception:
         logger.exception("failed to publish home view")
+
+
+@app.action(ACTION_CONNECT_CANVAS)
+def handle_connect_canvas(ack, body, client, logger):
+    """Open the connect modal when the user clicks 'Connect Canvas'."""
+    ack()
+    try:
+        client.views_open(trigger_id=body["trigger_id"], view=connect_modal_view())
+    except Exception:
+        logger.exception("failed to open connect modal")
+
+
+@app.view(CALLBACK_CONNECT_MODAL)
+def handle_connect_modal_submission(ack, body, client, view, logger):
+    """Validate and store credentials when the connect modal is submitted."""
+    state_values = view["state"]["values"]
+    base_url = state_values["url_block"]["url_input"]["value"]
+    token = state_values["token_block"]["token_input"]["value"]
+    
+    api_url = base_url.rstrip("/") + "/api/v1"
+    creds = CanvasCreds(canvas_base_url=base_url, canvas_api_url=api_url, canvas_token=token)
+    
+    try:
+        name = canvas_rest.validate_creds(creds)
+    except Exception:
+        ack(response_action="errors", errors={"token_block": "Could not connect. Is the token valid?"})
+        return
+        
+    set_store_creds(body["user"]["id"], creds)
+    ack(response_action="clear")
+    try:
+        client.chat_postMessage(channel=body["user"]["id"], text=f"✅ Connected as {name}")
+    except Exception:
+        pass
+
+
+@app.action(ACTION_DISCONNECT_CANVAS)
+def handle_disconnect_canvas(ack, body, client, logger):
+    """Delete the user's stored Canvas credentials and refresh the Home tab."""
+    ack()
+    delete_store_creds(body["user"]["id"])
+    try:
+        client.views_publish(user_id=body["user"]["id"], view={"type": "home", "blocks": connect_prompt_blocks()})
+    except Exception:
+        logger.exception("failed to publish connect prompt view on disconnect")
 
 
 @app.action(ACTION_REFRESH_HOME)

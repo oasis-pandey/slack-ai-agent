@@ -15,6 +15,9 @@ ACTION_REMIND_ASSIGNMENT = "remind_assignment"
 ACTION_REFRESH_HOME = "refresh_home"
 ACTION_CONFIRM_WRITE = "confirm_write"
 ACTION_CANCEL_WRITE = "cancel_write"
+ACTION_CONNECT_CANVAS = "connect_canvas"
+ACTION_DISCONNECT_CANVAS = "disconnect_canvas"
+CALLBACK_CONNECT_MODAL = "connect_modal_submission"
 
 # Slack limits we have to respect.
 SECTION_TEXT_LIMIT = 2900  # hard limit is 3000; leave room for the truncation note
@@ -289,7 +292,86 @@ def home_view(
         )
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": lines}})
 
+    blocks.append({"type": "divider"})
+    blocks.append({
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Disconnect Canvas"},
+                "action_id": ACTION_DISCONNECT_CANVAS,
+                "style": "danger"
+            }
+        ]
+    })
+
     return {"type": "home", "blocks": blocks}
+
+
+def connect_prompt_blocks() -> list[dict]:
+    """A simple message/Home section prompting the user to connect Canvas."""
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "It looks like your Canvas account isn't connected yet! Connect it to see your due dates, grades, and announcements right here in Slack."
+            }
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "🔗 Connect Canvas", "emoji": True},
+                    "action_id": ACTION_CONNECT_CANVAS,
+                    "style": "primary"
+                }
+            ]
+        }
+    ]
+
+
+def connect_modal_view() -> dict:
+    """The modal form for users to paste their Canvas base URL and token."""
+    return {
+        "type": "modal",
+        "callback_id": CALLBACK_CONNECT_MODAL,
+        "title": {"type": "plain_text", "text": "Connect Canvas"},
+        "submit": {"type": "plain_text", "text": "Connect"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": "url_block",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "url_input",
+                    "placeholder": {"type": "plain_text", "text": "e.g. https://canvas.instructure.com"}
+                },
+                "label": {"type": "plain_text", "text": "Canvas Base URL"}
+            },
+            {
+                "type": "input",
+                "block_id": "token_block",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "token_input",
+                    "placeholder": {"type": "plain_text", "text": "Paste your Canvas access token here"}
+                },
+                "label": {"type": "plain_text", "text": "Personal Access Token"}
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "To generate a token, log into Canvas and go to *Account → Settings → New Access Token*."
+                    }
+                ]
+            }
+        ]
+    }
 
 
 def announcement_modal_view(announcement: dict) -> dict:
