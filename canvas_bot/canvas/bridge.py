@@ -91,3 +91,10 @@ def result_to_text(result):
     """Flatten an MCP CallToolResult into a single text string for the LLM."""
     parts = [getattr(block, "text", str(block)) for block in result.content]
     return "\n".join(p for p in parts if p) or "(no content returned)"
+
+
+async def call_tool_once(name: str, args: dict) -> str:
+    """Helper to open a canvas_session, call a single tool, and return its text result."""
+    async with canvas_session() as session:
+        result = await session.call_tool(name, args)
+        return result_to_text(result)

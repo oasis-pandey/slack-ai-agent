@@ -13,6 +13,8 @@ from datetime import datetime
 ACTION_VIEW_ANNOUNCEMENT = "view_announcement"
 ACTION_REMIND_ASSIGNMENT = "remind_assignment"
 ACTION_REFRESH_HOME = "refresh_home"
+ACTION_CONFIRM_WRITE = "confirm_write"
+ACTION_CANCEL_WRITE = "cancel_write"
 
 # Slack limits we have to respect.
 SECTION_TEXT_LIMIT = 2900  # hard limit is 3000; leave room for the truncation note
@@ -329,3 +331,34 @@ def announcement_modal_view(announcement: dict) -> dict:
         "close": {"type": "plain_text", "text": "Close"},
         "blocks": blocks,
     }
+
+
+def write_confirmation_blocks(summary: str, tool_name: str, args: dict) -> list[dict]:
+    """A section with a summary of the pending write, plus Confirm/Cancel buttons.
+    
+    The Confirm button's value carries the JSON payload to execute the write.
+    """
+    payload = json.dumps({"tool_name": tool_name, "args": args})
+    return [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*{summary}*"}
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "emoji": True, "text": "✅ Confirm"},
+                    "style": "primary",
+                    "action_id": ACTION_CONFIRM_WRITE,
+                    "value": _truncate(payload, 2000),
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "emoji": True, "text": "✖️ Cancel"},
+                    "action_id": ACTION_CANCEL_WRITE,
+                },
+            ]
+        }
+    ]

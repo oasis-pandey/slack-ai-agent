@@ -7,6 +7,8 @@ from canvas_bot.slack.blocks import (
     ACTION_REFRESH_HOME,
     ACTION_REMIND_ASSIGNMENT,
     ACTION_VIEW_ANNOUNCEMENT,
+    ACTION_CONFIRM_WRITE,
+    ACTION_CANCEL_WRITE,
     MAX_CARDS,
     MAX_LIST_ITEMS,
     MODAL_TITLE_LIMIT,
@@ -15,6 +17,7 @@ from canvas_bot.slack.blocks import (
     announcement_list_blocks,
     announcement_modal_view,
     assignment_card_blocks,
+    write_confirmation_blocks,
     home_view,
     html_to_slack,
 )
@@ -265,3 +268,31 @@ def test_modal_includes_body_and_canvas_link():
 def test_modal_without_url_has_no_link_button():
     view = announcement_modal_view(_rec(html_url=None))
     assert not any(b.get("type") == "actions" for b in view["blocks"])
+
+
+# --- write_confirmation_blocks ----------------------------------------------
+
+def test_write_confirmation_blocks_has_summary_and_buttons():
+    summary = "Post announcement 'Hello' to CS101"
+    tool_name = "create_announcement"
+    args = {"course_identifier": "123", "title": "Hello", "message": "World"}
+    blocks = write_confirmation_blocks(summary, tool_name, args)
+    
+    assert len(blocks) == 2
+    assert blocks[0]["type"] == "section"
+    assert summary in blocks[0]["text"]["text"]
+    
+    actions = blocks[1]
+    assert actions["type"] == "actions"
+    assert len(actions["elements"]) == 2
+    
+    confirm_btn = actions["elements"][0]
+    assert confirm_btn["action_id"] == ACTION_CONFIRM_WRITE
+    
+    cancel_btn = actions["elements"][1]
+    assert cancel_btn["action_id"] == ACTION_CANCEL_WRITE
+    
+    # Payload check
+    payload = json.loads(confirm_btn["value"])
+    assert payload["tool_name"] == tool_name
+    assert payload["args"] == args
