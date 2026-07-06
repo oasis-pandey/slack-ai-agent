@@ -38,6 +38,8 @@ from .slack.blocks import (
     connect_modal_view,
     digest_blocks,
     home_view,
+    _grade_line,
+    MSG_NO_GRADES,
 )
 from .slack.helpers import (
     MENTION_RE,
@@ -455,6 +457,42 @@ def handle_composer_modal_submission(ack, body, client, view, logger):
             client.chat_postMessage(channel=user_id, text="Something went wrong while preparing the announcement.")
         except Exception:
             pass
+
+
+@app.command("/canvas")
+def handle_canvas_command(ack, body, respond, logger):
+    """Handle /canvas slash commands for quick data access without LLM latency."""
+    ack()
+    user_id = body["user_id"]
+    text = body.get("text", "").strip().lower()
+    creds = _get_user_creds(user_id)
+    
+    if not creds:
+        respond(blocks=connect_prompt_blocks())
+        return
+
+    try:
+        if text == "due":
+            assignments = canvas_rest.list_upcoming_assignments(creds)
+            blocks = assignment_card_blocks(assignments)
+            respond(blocks=blocks)
+        elif text == "grades":
+            grades = canvas_rest.list_current_grades(creds)
+            if grades:
+                lines = "\n".join(_grade_line(g) for g in grades)
+                blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": f"*📊 Your Grades*\n{lines}"}}]
+            else:
+                blocks = [{"type": "context", "elements": [{"type": "mrkdwn", "text": MSG_NO_GRADES}]}]
+            respond(blocks=blocks)
+        elif text == "announcements":
+            announcements = canvas_rest.list_recent_announcements(creds)
+            blocks = announcement_list_blocks(announcements)
+            respond(blocks=blocks)
+        else:
+            respond(text="Unknown command. Try `/canvas due`, `/canvas grades`, or `/canvas announcements`.")
+    except Exception:
+        logger.exception("failed to handle /canvas %s", text)
+        respond(text="Something went wrong while fetching data from Canvas.")
 
 
 def send_digest():
