@@ -88,12 +88,12 @@ entry (`reply_to_discussion_entry`). These are seen by other people and can't be
 undone from here, so NEVER call one on the user's first request. \
 Instead: resolve the details (course via `list_courses`; for posting/replying, \
 find the topic via `list_discussion_topics` and the entry via \
-`list_discussion_entries`), then reply with a short summary of EXACTLY what you \
-will do — the course name, the action, the title, and the message text — and \
-ask the user to confirm (e.g. "Want me to post this? Reply *yes* to confirm."). \
-Only when the user's next message clearly confirms ("yes", "go ahead", "post \
-it") do you call the write tool. If the confirmed message differs, or they say \
-no, don't write. Read-only questions never need confirmation — just answer.
+`list_discussion_entries`), then STOP and return the pending write for confirmation \
+by calling the `request_write_confirmation` tool instead of calling the write tool \
+directly or asking for a typed yes. The `summary` argument should be a one-line \
+human description (course name + action + title/message). \
+Only after the user confirms via the UI will the write happen. Read-only \
+questions never need confirmation — just answer.
 
 - After a successful write, briefly confirm what was done. If a write tool \
 errors (e.g. you lack permission in that course — you're only a teacher/TA in \
@@ -109,6 +109,24 @@ one or two short sentences. Never a wall of text.
 only if it genuinely helps. Cut anything the user didn't ask for."""
 
 
+REQUEST_WRITE_CONFIRMATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "request_write_confirmation",
+        "description": "Request user confirmation before making a course-visible write.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tool_name": {"type": "string", "description": "The name of the write tool (e.g. create_announcement)"},
+                "args": {"type": "object", "description": "The arguments for the write tool as a JSON object"},
+                "summary": {"type": "string", "description": "A one-line human description of the action (course name + action + title/message)"}
+            },
+            "required": ["tool_name", "args", "summary"]
+        }
+    }
+}
+
+
 @dataclass
 class AgentResult:
     """What run_agent returns: the natural-language answer plus any structured
@@ -118,6 +136,7 @@ class AgentResult:
     text: str
     announcements: list = field(default_factory=list)
     assignments: list = field(default_factory=list)
+    pending_write: dict | None = None
 
 
 def _tool_use_failed_detail(err: BadRequestError):
@@ -156,7 +175,7 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
 
     async with canvas_session() as session:
         # canvas-mcp tools + our local REST-backed tools (e.g. planner notes).
-        tools = to_groq_tools((await session.list_tools()).tools) + LOCAL_TOOL_SCHEMAS
+        tools = to_groq_tools((await session.list_tools()).tools) + LOCAL_TOOL_SCHEMAS + [REQUEST_WRITE_CONFIRMATION_SCHEMA]
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT.format(today=today)},
             *history,
@@ -251,7 +270,18 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                 except json.JSONDecodeError:
                     args = {}
                 try:
-                    if tc.function.name in LOCAL_TOOL_NAMES:
+                    if tc.function.name == "request_write_confirmation":
+                        return AgentResult(
+                            text="Please confirm this action.",
+                            announcements=announcements,
+                            assignments=assignments,
+                            pending_write={
+                                "tool_name": args.get("tool_name"),
+                                "args": args.get("args"),
+                                "summary": args.get("summary")
+                            }
+                        )
+                    elif tc.function.name in LOCAL_TOOL_NAMES:
                         # Handled by us via direct Canvas REST, not canvas-mcp.
                         text = dispatch_local_tool(tc.function.name, args)
                     else:

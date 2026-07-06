@@ -15,14 +15,18 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from .agent import AgentResult, run_agent
+from .canvas import bridge
 from .canvas import rest as canvas_rest
 from .slack.blocks import (
     ACTION_REFRESH_HOME,
     ACTION_REMIND_ASSIGNMENT,
     ACTION_VIEW_ANNOUNCEMENT,
+    ACTION_CONFIRM_WRITE,
+    ACTION_CANCEL_WRITE,
     announcement_list_blocks,
     announcement_modal_view,
     assignment_card_blocks,
+    write_confirmation_blocks,
     home_view,
 )
 from .slack.helpers import (
@@ -114,7 +118,19 @@ def handle_mention(event, client, say):
     # `text` is the notification/accessibility fallback shown when blocks render.
     blocks = None
     text = result.text or "(no response)"
-    if result.announcements:
+    if result.pending_write:
+        try:
+            blocks = write_confirmation_blocks(
+                summary=result.pending_write["summary"],
+                tool_name=result.pending_write["tool_name"],
+                args=result.pending_write["args"],
+            )
+            text = "Please confirm your action."
+        except Exception:
+            logging.exception("failed to build write confirmation blocks")
+            blocks = None
+            text = result.text or "I prepared to write something but couldn't format the confirmation."
+    elif result.announcements:
         try:
             blocks = announcement_list_blocks(result.announcements)
             # With blocks, `text` is only the notification preview — keep it short
@@ -201,6 +217,51 @@ def handle_remind_assignment(ack, body, client, logger):
             )
         except Exception:
             pass
+
+
+@app.action(ACTION_CONFIRM_WRITE)
+def handle_confirm_write(ack, body, client, logger):
+    """Execute the write by calling the named canvas-mcp tool once."""
+    ack()
+    try:
+        payload = json.loads(body["actions"][0]["value"])
+        tool_name = payload["tool_name"]
+        args = payload["args"]
+        
+        result_text = asyncio.run(bridge.call_tool_once(tool_name, args))
+        
+        client.chat_update(
+            channel=body["channel"]["id"],
+            ts=body["message"]["ts"],
+            text=_fit(f"✅ Done: {result_text}"),
+            blocks=[]
+        )
+    except Exception as e:
+        logger.exception("failed to execute write")
+        try:
+            client.chat_update(
+                channel=body["channel"]["id"],
+                ts=body["message"]["ts"],
+                text=_fit(f"❌ Failed to execute: {e}"),
+                blocks=[]
+            )
+        except Exception:
+            pass
+
+
+@app.action(ACTION_CANCEL_WRITE)
+def handle_cancel_write(ack, body, client, logger):
+    """Cancel the write and clear the confirmation blocks."""
+    ack()
+    try:
+        client.chat_update(
+            channel=body["channel"]["id"],
+            ts=body["message"]["ts"],
+            text="Okay, cancelled.",
+            blocks=[]
+        )
+    except Exception:
+        logger.exception("failed to cancel write")
 
 
 def _build_home_view() -> dict:
