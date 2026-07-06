@@ -22,8 +22,10 @@ from canvas_bot.slack.blocks import (
     write_confirmation_blocks,
     connect_prompt_blocks,
     connect_modal_view,
+    digest_blocks,
     home_view,
     html_to_slack,
+    announcement_composer_view,
 )
 
 
@@ -202,8 +204,11 @@ def _grade(course="CS.2318.001", grade="A", score=102.49):
 def test_home_view_is_a_home_surface_with_refresh():
     view = home_view([_grade()], [], [], now=NOW)
     assert view["type"] == "home"
-    btn = view["blocks"][0]["accessory"]
-    assert btn["action_id"] == ACTION_REFRESH_HOME
+    actions_block = view["blocks"][1]
+    assert actions_block["type"] == "actions"
+    action_ids = [btn["action_id"] for btn in actions_block["elements"]]
+    assert "refresh_home" in action_ids
+    assert "new_announcement" in action_ids
 
 
 def test_home_view_grades_render_with_letter_and_percent():
@@ -322,3 +327,65 @@ def test_connect_modal_view_has_url_and_token_inputs():
     action_ids = [i["element"]["action_id"] for i in inputs]
     assert "url_input" in action_ids
     assert "token_input" in action_ids
+
+
+# --- digest_blocks ----------------------------------------------------------
+
+def test_digest_blocks_headline_counts():
+    assignments = [
+        {"id": 1, "title": "Due Today", "due_at": "2026-07-03T12:00:00Z"},
+        {"id": 2, "title": "Due This Week", "due_at": "2026-07-05T12:00:00Z"},
+        {"id": 3, "title": "Due Later", "due_at": "2026-07-20T12:00:00Z"},
+    ]
+    announcements = [{"id": 1}, {"id": 2}]
+    # Mocking now to be 2026-07-03 (same as NOW in the file)
+    blocks = digest_blocks(assignments, announcements, now=NOW)
+    
+    headline = blocks[1]["elements"][0]["text"]
+    assert "🔴 1 due today" in headline
+    assert "🟡 1 this week" in headline
+    assert "📢 2 new announcements" in headline
+
+
+def test_digest_blocks_caps_assignments_at_3():
+    assignments = [
+        {"id": i, "title": f"Assign {i}", "due_at": "2026-07-03T12:00:00Z"} for i in range(10)
+    ]
+    blocks = digest_blocks(assignments, [], now=NOW)
+    # 2 header/context blocks, 1 divider, 3 assignments = 6 blocks
+    assert len(blocks) == 6
+
+
+# --- announcement_composer_view ---------------------------------------------
+
+def test_announcement_composer_view():
+    courses = [{"id": 101, "name": "Math"}, {"id": 102, "name": "History"}]
+    view = announcement_composer_view(courses)
+    
+    assert view["type"] == "modal"
+    assert view["callback_id"] == "composer_modal_submission"
+    
+    # Check that it has course, title, and body inputs
+    blocks = view["blocks"]
+    assert len(blocks) == 3
+    
+    course_block = blocks[0]
+    assert course_block["element"]["type"] == "static_select"
+    assert len(course_block["element"]["options"]) == 2
+    assert course_block["element"]["options"][0]["value"] == "101"
+    assert course_block["element"]["options"][0]["text"]["text"] == "Math"
+    
+    title_block = blocks[1]
+    assert title_block["element"]["action_id"] == "title_input"
+    
+    body_block = blocks[2]
+    assert body_block["element"]["action_id"] == "body_input"
+    assert body_block["element"]["multiline"] is True
+
+
+def test_announcement_composer_view_empty_courses():
+    view = announcement_composer_view([])
+    options = view["blocks"][0]["element"]["options"]
+    assert len(options) == 1
+    assert options[0]["value"] == "none"
+    assert "No active courses found" in options[0]["text"]["text"]

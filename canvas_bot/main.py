@@ -26,13 +26,17 @@ from .slack.blocks import (
     ACTION_CANCEL_WRITE,
     ACTION_CONNECT_CANVAS,
     ACTION_DISCONNECT_CANVAS,
+    ACTION_NEW_ANNOUNCEMENT,
     CALLBACK_CONNECT_MODAL,
+    CALLBACK_COMPOSER_MODAL,
     announcement_list_blocks,
     announcement_modal_view,
+    announcement_composer_view,
     assignment_card_blocks,
     write_confirmation_blocks,
     connect_prompt_blocks,
     connect_modal_view,
+    digest_blocks,
     home_view,
 )
 from .slack.helpers import (
@@ -409,7 +413,87 @@ def handle_refresh_home(ack, body, client, logger):
         logger.exception("failed to refresh home view")
 
 
+@app.action(ACTION_NEW_ANNOUNCEMENT)
+def handle_new_announcement(ack, body, client, logger):
+    """Open the modal composer for a new announcement when the Home button is clicked."""
+    ack()
+    creds = _get_user_creds(body["user"]["id"])
+    if not creds:
+        return
+    try:
+        courses = canvas_rest.get_active_courses(creds)
+        client.views_open(trigger_id=body["trigger_id"], view=announcement_composer_view(courses))
+    except Exception:
+        logger.exception("failed to open announcement composer")
+
+
+@app.view(CALLBACK_COMPOSER_MODAL)
+def handle_composer_modal_submission(ack, body, client, view, logger):
+    """Parse the composer inputs and prompt for confirmation via a direct message."""
+    ack(response_action="clear")
+    user_id = body["user"]["id"]
+    try:
+        values = view["state"]["values"]
+        course_opt = values["course_block"]["course_input"]["selected_option"]
+        course_id = course_opt["value"]
+        course_name = course_opt["text"]["text"]
+        title = values["title_block"]["title_input"]["value"]
+        message = values["body_block"]["body_input"]["value"]
+        
+        args = {
+            "course_identifier": course_id,
+            "title": title,
+            "message": message,
+        }
+        summary = f"New announcement in {course_name}: {title}"
+        
+        blocks = write_confirmation_blocks(summary=summary, tool_name="create_announcement", args=args)
+        client.chat_postMessage(channel=user_id, text="Please confirm your action.", blocks=blocks)
+    except Exception:
+        logger.exception("failed to handle composer submission")
+        try:
+            client.chat_postMessage(channel=user_id, text="Something went wrong while preparing the announcement.")
+        except Exception:
+            pass
+
+
+def send_digest():
+    """Scheduled job to post a Canvas digest to a configured user or channel."""
+    target_id = os.environ.get("DIGEST_TARGET_USER_ID")
+    if not target_id:
+        return
+    creds = _get_user_creds(target_id)
+    if not creds:
+        logging.warning("Digest skipped: no credentials found for %s", target_id)
+        return
+    try:
+        assignments = canvas_rest.list_upcoming_assignments(creds)
+    except Exception:
+        assignments = []
+    try:
+        announcements = canvas_rest.list_recent_announcements(creds)
+    except Exception:
+        announcements = []
+    
+    blocks = digest_blocks(assignments, announcements)
+    try:
+        app.client.chat_postMessage(channel=target_id, text="Your Canvas Digest", blocks=blocks)
+        logging.info("Sent scheduled digest to %s", target_id)
+    except Exception as e:
+        logging.exception("failed to send digest to %s: %s", target_id, e)
+
+
 if __name__ == "__main__":
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    
+    hour = int(os.environ.get("DIGEST_HOUR", 9))
+    minute = int(os.environ.get("DIGEST_MINUTE", 0))
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(send_digest, CronTrigger(hour=hour, minute=minute))
+    scheduler.start()
+    print(f"⏰ Scheduled digest for {hour:02d}:{minute:02d} daily.")
+
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     print("⚡️ Canvas agent is running (Socket Mode)…")
     handler.start()

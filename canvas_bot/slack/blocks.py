@@ -17,7 +17,10 @@ ACTION_CONFIRM_WRITE = "confirm_write"
 ACTION_CANCEL_WRITE = "cancel_write"
 ACTION_CONNECT_CANVAS = "connect_canvas"
 ACTION_DISCONNECT_CANVAS = "disconnect_canvas"
+ACTION_NEW_ANNOUNCEMENT = "new_announcement"
+
 CALLBACK_CONNECT_MODAL = "connect_modal_submission"
+CALLBACK_COMPOSER_MODAL = "composer_modal_submission"
 
 # Slack limits we have to respect.
 SECTION_TEXT_LIMIT = 2900  # hard limit is 3000; leave room for the truncation note
@@ -240,6 +243,33 @@ def _context(text: str) -> dict:
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}
 
 
+def digest_blocks(assignments: list[dict], announcements: list[dict], now: datetime | None = None) -> list[dict]:
+    """A compact summary of what's due and what's new for the scheduled digest."""
+    now = now or datetime.now()
+    n_today, m_week = 0, 0
+    for a in assignments:
+        emoji, _ = _due_meta(a.get("due_at"), now)
+        if emoji == "🔴":
+            n_today += 1
+        elif emoji == "🟡":
+            m_week += 1
+    
+    k_new = len(announcements)
+    headline = f"🔴 {n_today} due today  ·  🟡 {m_week} this week  ·  📢 {k_new} new announcements"
+    
+    blocks: list[dict] = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Good morning! ☕️"}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": headline}]},
+    ]
+    
+    if assignments:
+        blocks.append({"type": "divider"})
+        ordered = sorted(assignments, key=lambda r: r.get("due_at") or "9999", reverse=False)
+        blocks.extend(_assignment_card(r, now) for r in ordered[:3])
+        
+    return blocks
+
+
 def home_view(
     grades: list[dict],
     assignments: list[dict],
@@ -252,18 +282,22 @@ def home_view(
     `views.publish` view dict. Empty sections show a friendly state.
     """
     now = now or datetime.now()
-    blocks: list[dict] = [
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"Canvas Dashboard  ·  {now.strftime('%b %-d')}"}},
         {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"*📚 Your Canvas Dashboard*\n_{now.strftime('%A, %b %d')}_",
-            },
-            "accessory": {
-                "type": "button",
-                "text": {"type": "plain_text", "text": "🔄 Refresh"},
-                "action_id": ACTION_REFRESH_HOME,
-            },
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "🔄 Refresh"},
+                    "action_id": ACTION_REFRESH_HOME,
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "✍️ New announcement"},
+                    "action_id": ACTION_NEW_ANNOUNCEMENT,
+                }
+            ],
         },
         {"type": "divider"},
         _header("📋 Due soon"),
@@ -371,6 +405,65 @@ def connect_modal_view() -> dict:
                 ]
             }
         ]
+    }
+
+
+def announcement_composer_view(courses: list[dict]) -> dict:
+    """A modal to compose a new Canvas announcement."""
+    options = []
+    for c in courses:
+        if c.get("id") and c.get("name"):
+            options.append({
+                "text": {"type": "plain_text", "text": _truncate(c["name"], 75)},
+                "value": str(c["id"])
+            })
+    
+    if not options:
+        options.append({
+            "text": {"type": "plain_text", "text": "No active courses found"},
+            "value": "none"
+        })
+
+    return {
+        "type": "modal",
+        "callback_id": CALLBACK_COMPOSER_MODAL,
+        "title": {"type": "plain_text", "text": "New Announcement"},
+        "submit": {"type": "plain_text", "text": "Next"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": "course_block",
+                "element": {
+                    "type": "static_select",
+                    "action_id": "course_input",
+                    "placeholder": {"type": "plain_text", "text": "Select a course"},
+                    "options": options
+                },
+                "label": {"type": "plain_text", "text": "Course"},
+            },
+            {
+                "type": "input",
+                "block_id": "title_block",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "title_input",
+                    "placeholder": {"type": "plain_text", "text": "Announcement title"},
+                },
+                "label": {"type": "plain_text", "text": "Title"},
+            },
+            {
+                "type": "input",
+                "block_id": "body_block",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "body_input",
+                    "multiline": True,
+                    "placeholder": {"type": "plain_text", "text": "What do you want to say?"},
+                },
+                "label": {"type": "plain_text", "text": "Message"},
+            },
+        ],
     }
 
 
