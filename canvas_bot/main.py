@@ -17,16 +17,22 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from .agent import AgentResult, run_agent
 from .canvas import bridge
 from .canvas import rest as canvas_rest
+from .store import get_creds as get_store_creds, set_creds as set_store_creds, delete_creds as delete_store_creds, CanvasCreds
 from .slack.blocks import (
     ACTION_REFRESH_HOME,
     ACTION_REMIND_ASSIGNMENT,
     ACTION_VIEW_ANNOUNCEMENT,
     ACTION_CONFIRM_WRITE,
     ACTION_CANCEL_WRITE,
+    ACTION_CONNECT_CANVAS,
+    ACTION_DISCONNECT_CANVAS,
+    CALLBACK_CONNECT_MODAL,
     announcement_list_blocks,
     announcement_modal_view,
     assignment_card_blocks,
     write_confirmation_blocks,
+    connect_prompt_blocks,
+    connect_modal_view,
     home_view,
 )
 from .slack.helpers import (
@@ -59,6 +65,19 @@ def _fit(text: str) -> str:
     return text[:SLACK_TEXT_LIMIT].rstrip() + "\n\n…(truncated)"
 
 
+def _get_user_creds(user_id: str) -> CanvasCreds | None:
+    creds = get_store_creds(user_id)
+    if creds is not None:
+        return creds
+    if os.environ.get("ALLOW_ENV_CREDS") == "1":
+        base = os.environ.get("CANVAS_BASE_URL")
+        api = os.environ.get("CANVAS_API_URL")
+        token = os.environ.get("CANVAS_API_TOKEN")
+        if base and api and token:
+            return CanvasCreds(canvas_base_url=base, canvas_api_url=api, canvas_token=token)
+    return None
+
+
 @app.event("app_mention")
 def handle_mention(event, client, say):
     """Answer Canvas questions when the bot is @mentioned."""
@@ -75,6 +94,12 @@ def handle_mention(event, client, say):
         say(text="Ask me anything about your Canvas — assignments, grades, "
                  "announcements. Try *\"what's due this week?\"*",
             thread_ts=thread_ts)
+        return
+
+    user_id = event.get("user")
+    creds = _get_user_creds(user_id) if user_id else None
+    if not creds:
+        say(blocks=connect_prompt_blocks(), text="Please connect Canvas.", thread_ts=thread_ts)
         return
 
     # Try to read the thread for multi-turn context. If we lack the history
@@ -103,7 +128,7 @@ def handle_mention(event, client, say):
         # Hard timeout guarantees the handler always terminates.
         result = asyncio.run(
             asyncio.wait_for(
-                run_agent(history, on_tool_call=notify_canvas),
+                run_agent(history, creds, on_tool_call=notify_canvas),
                 timeout=AGENT_TIMEOUT,
             )
         )
@@ -178,9 +203,12 @@ def handle_view_announcement(ack, body, client, logger):
     the single announcement and open the modal immediately.
     """
     ack()
+    creds = _get_user_creds(body["user"]["id"])
+    if not creds:
+        return
     try:
         course_id, topic_id = body["actions"][0]["value"].split(":", 1)
-        announcement = canvas_rest.get_announcement(course_id, topic_id)
+        announcement = canvas_rest.get_announcement(creds, course_id, topic_id)
         client.views_open(
             trigger_id=body["trigger_id"],
             view=announcement_modal_view(announcement),
@@ -197,11 +225,14 @@ def handle_remind_assignment(ack, body, client, logger):
     into a Canvas planner note and confirm privately (ephemeral) to the clicker.
     """
     ack()
+    creds = _get_user_creds(body["user"]["id"])
+    if not creds:
+        return
     try:
         payload = json.loads(body["actions"][0]["value"])
         title = payload.get("t") or "To-do"
         due = payload.get("d") or None
-        canvas_rest.create_planner_note(title=f"📌 {title}", todo_date=due)
+        canvas_rest.create_planner_note(creds, title=f"📌 {title}", todo_date=due)
         client.chat_postEphemeral(
             channel=body["channel"]["id"],
             user=body["user"]["id"],
@@ -223,12 +254,15 @@ def handle_remind_assignment(ack, body, client, logger):
 def handle_confirm_write(ack, body, client, logger):
     """Execute the write by calling the named canvas-mcp tool once."""
     ack()
+    creds = _get_user_creds(body["user"]["id"])
+    if not creds:
+        return
     try:
         payload = json.loads(body["actions"][0]["value"])
         tool_name = payload["tool_name"]
         args = payload["args"]
         
-        result_text = asyncio.run(bridge.call_tool_once(tool_name, args))
+        result_text = asyncio.run(bridge.call_tool_once(tool_name, args, creds))
         
         client.chat_update(
             channel=body["channel"]["id"],
@@ -264,7 +298,7 @@ def handle_cancel_write(ack, body, client, logger):
         logger.exception("failed to cancel write")
 
 
-def _build_home_view() -> dict:
+def _build_home_view(creds: CanvasCreds) -> dict:
     """Assemble the App Home dashboard from live Canvas data (via REST).
 
     Each source is fetched independently so one failure just leaves that
@@ -272,15 +306,15 @@ def _build_home_view() -> dict:
     """
     grades, assignments, todos = [], [], []
     try:
-        grades = canvas_rest.list_current_grades()
+        grades = canvas_rest.list_current_grades(creds)
     except Exception:
         logging.exception("home: failed to load grades")
     try:
-        assignments = canvas_rest.list_upcoming_assignments()
+        assignments = canvas_rest.list_upcoming_assignments(creds)
     except Exception:
         logging.exception("home: failed to load upcoming assignments")
     try:
-        todos = canvas_rest.list_todo()
+        todos = canvas_rest.list_todo(creds)
     except Exception:
         logging.exception("home: failed to load to-dos")
     return home_view(grades, assignments, todos, now=datetime.now())
@@ -291,18 +325,73 @@ def handle_home_opened(event, client, logger):
     """Publish the Canvas dashboard when the user opens the bot's Home tab."""
     if event.get("tab") != "home":
         return  # also fires for the Messages tab — ignore that
+    creds = _get_user_creds(event["user"])
+    if not creds:
+        try:
+            client.views_publish(user_id=event["user"], view={"type": "home", "blocks": connect_prompt_blocks()})
+        except Exception:
+            logger.exception("failed to publish connect prompt view")
+        return
     try:
-        client.views_publish(user_id=event["user"], view=_build_home_view())
+        client.views_publish(user_id=event["user"], view=_build_home_view(creds))
     except Exception:
         logger.exception("failed to publish home view")
+
+
+@app.action(ACTION_CONNECT_CANVAS)
+def handle_connect_canvas(ack, body, client, logger):
+    """Open the connect modal when the user clicks 'Connect Canvas'."""
+    ack()
+    try:
+        client.views_open(trigger_id=body["trigger_id"], view=connect_modal_view())
+    except Exception:
+        logger.exception("failed to open connect modal")
+
+
+@app.view(CALLBACK_CONNECT_MODAL)
+def handle_connect_modal_submission(ack, body, client, view, logger):
+    """Validate and store credentials when the connect modal is submitted."""
+    state_values = view["state"]["values"]
+    base_url = state_values["url_block"]["url_input"]["value"]
+    token = state_values["token_block"]["token_input"]["value"]
+    
+    api_url = base_url.rstrip("/") + "/api/v1"
+    creds = CanvasCreds(canvas_base_url=base_url, canvas_api_url=api_url, canvas_token=token)
+    
+    try:
+        name = canvas_rest.validate_creds(creds)
+    except Exception:
+        ack(response_action="errors", errors={"token_block": "Could not connect. Is the token valid?"})
+        return
+        
+    set_store_creds(body["user"]["id"], creds)
+    ack(response_action="clear")
+    try:
+        client.chat_postMessage(channel=body["user"]["id"], text=f"✅ Connected as {name}")
+    except Exception:
+        pass
+
+
+@app.action(ACTION_DISCONNECT_CANVAS)
+def handle_disconnect_canvas(ack, body, client, logger):
+    """Delete the user's stored Canvas credentials and refresh the Home tab."""
+    ack()
+    delete_store_creds(body["user"]["id"])
+    try:
+        client.views_publish(user_id=body["user"]["id"], view={"type": "home", "blocks": connect_prompt_blocks()})
+    except Exception:
+        logger.exception("failed to publish connect prompt view on disconnect")
 
 
 @app.action(ACTION_REFRESH_HOME)
 def handle_refresh_home(ack, body, client, logger):
     """Re-publish the dashboard when '🔄 Refresh' is clicked."""
     ack()
+    creds = _get_user_creds(body["user"]["id"])
+    if not creds:
+        return
     try:
-        client.views_publish(user_id=body["user"]["id"], view=_build_home_view())
+        client.views_publish(user_id=body["user"]["id"], view=_build_home_view(creds))
     except Exception:
         logger.exception("failed to refresh home view")
 
