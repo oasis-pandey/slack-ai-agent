@@ -17,7 +17,10 @@ ACTION_CONFIRM_WRITE = "confirm_write"
 ACTION_CANCEL_WRITE = "cancel_write"
 ACTION_CONNECT_CANVAS = "connect_canvas"
 ACTION_DISCONNECT_CANVAS = "disconnect_canvas"
+ACTION_NEW_ANNOUNCEMENT = "new_announcement"
+
 CALLBACK_CONNECT_MODAL = "connect_modal_submission"
+CALLBACK_COMPOSER_MODAL = "composer_modal_submission"
 
 # Slack limits we have to respect.
 SECTION_TEXT_LIMIT = 2900  # hard limit is 3000; leave room for the truncation note
@@ -279,18 +282,22 @@ def home_view(
     `views.publish` view dict. Empty sections show a friendly state.
     """
     now = now or datetime.now()
-    blocks: list[dict] = [
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"Canvas Dashboard  ·  {now.strftime('%b %-d')}"}},
         {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"*📚 Your Canvas Dashboard*\n_{now.strftime('%A, %b %d')}_",
-            },
-            "accessory": {
-                "type": "button",
-                "text": {"type": "plain_text", "text": "🔄 Refresh"},
-                "action_id": ACTION_REFRESH_HOME,
-            },
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "🔄 Refresh"},
+                    "action_id": ACTION_REFRESH_HOME,
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "✍️ New announcement"},
+                    "action_id": ACTION_NEW_ANNOUNCEMENT,
+                }
+            ],
         },
         {"type": "divider"},
         _header("📋 Due soon"),
@@ -398,6 +405,65 @@ def connect_modal_view() -> dict:
                 ]
             }
         ]
+    }
+
+
+def announcement_composer_view(courses: list[dict]) -> dict:
+    """A modal to compose a new Canvas announcement."""
+    options = []
+    for c in courses:
+        if c.get("id") and c.get("name"):
+            options.append({
+                "text": {"type": "plain_text", "text": _truncate(c["name"], 75)},
+                "value": str(c["id"])
+            })
+    
+    if not options:
+        options.append({
+            "text": {"type": "plain_text", "text": "No active courses found"},
+            "value": "none"
+        })
+
+    return {
+        "type": "modal",
+        "callback_id": CALLBACK_COMPOSER_MODAL,
+        "title": {"type": "plain_text", "text": "New Announcement"},
+        "submit": {"type": "plain_text", "text": "Next"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": "course_block",
+                "element": {
+                    "type": "static_select",
+                    "action_id": "course_input",
+                    "placeholder": {"type": "plain_text", "text": "Select a course"},
+                    "options": options
+                },
+                "label": {"type": "plain_text", "text": "Course"},
+            },
+            {
+                "type": "input",
+                "block_id": "title_block",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "title_input",
+                    "placeholder": {"type": "plain_text", "text": "Announcement title"},
+                },
+                "label": {"type": "plain_text", "text": "Title"},
+            },
+            {
+                "type": "input",
+                "block_id": "body_block",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "body_input",
+                    "multiline": True,
+                    "placeholder": {"type": "plain_text", "text": "What do you want to say?"},
+                },
+                "label": {"type": "plain_text", "text": "Message"},
+            },
+        ],
     }
 
 

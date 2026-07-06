@@ -26,9 +26,12 @@ from .slack.blocks import (
     ACTION_CANCEL_WRITE,
     ACTION_CONNECT_CANVAS,
     ACTION_DISCONNECT_CANVAS,
+    ACTION_NEW_ANNOUNCEMENT,
     CALLBACK_CONNECT_MODAL,
+    CALLBACK_COMPOSER_MODAL,
     announcement_list_blocks,
     announcement_modal_view,
+    announcement_composer_view,
     assignment_card_blocks,
     write_confirmation_blocks,
     connect_prompt_blocks,
@@ -408,6 +411,50 @@ def handle_refresh_home(ack, body, client, logger):
         client.views_publish(user_id=body["user"]["id"], view=_build_home_view(creds))
     except Exception:
         logger.exception("failed to refresh home view")
+
+
+@app.action(ACTION_NEW_ANNOUNCEMENT)
+def handle_new_announcement(ack, body, client, logger):
+    """Open the modal composer for a new announcement when the Home button is clicked."""
+    ack()
+    creds = _get_user_creds(body["user"]["id"])
+    if not creds:
+        return
+    try:
+        courses = canvas_rest.get_active_courses(creds)
+        client.views_open(trigger_id=body["trigger_id"], view=announcement_composer_view(courses))
+    except Exception:
+        logger.exception("failed to open announcement composer")
+
+
+@app.view(CALLBACK_COMPOSER_MODAL)
+def handle_composer_modal_submission(ack, body, client, view, logger):
+    """Parse the composer inputs and prompt for confirmation via a direct message."""
+    ack(response_action="clear")
+    user_id = body["user"]["id"]
+    try:
+        values = view["state"]["values"]
+        course_opt = values["course_block"]["course_input"]["selected_option"]
+        course_id = course_opt["value"]
+        course_name = course_opt["text"]["text"]
+        title = values["title_block"]["title_input"]["value"]
+        message = values["body_block"]["body_input"]["value"]
+        
+        args = {
+            "course_identifier": course_id,
+            "title": title,
+            "message": message,
+        }
+        summary = f"New announcement in {course_name}: {title}"
+        
+        blocks = write_confirmation_blocks(summary=summary, tool_name="create_announcement", args=args)
+        client.chat_postMessage(channel=user_id, text="Please confirm your action.", blocks=blocks)
+    except Exception:
+        logger.exception("failed to handle composer submission")
+        try:
+            client.chat_postMessage(channel=user_id, text="Something went wrong while preparing the announcement.")
+        except Exception:
+            pass
 
 
 def send_digest():
