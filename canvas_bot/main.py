@@ -97,6 +97,19 @@ def handle_mention(event, client, say):
         return
 
     user_id = event.get("user")
+    if user_id:
+        import time
+        now = time.time()
+        # Cooldown check: max 1 request every 15 seconds per user
+        if hasattr(app, "user_cooldowns"):
+            last_run = app.user_cooldowns.get(user_id, 0)
+            if now - last_run < 15:
+                say(text="Whoa, slow down! Please wait 15 seconds between questions to conserve API limits. 🐢", thread_ts=thread_ts)
+                return
+            app.user_cooldowns[user_id] = now
+        else:
+            app.user_cooldowns = {user_id: now}
+
     creds = _get_user_creds(user_id) if user_id else None
     if not creds:
         say(blocks=connect_prompt_blocks(), text="Please connect Canvas.", thread_ts=thread_ts)

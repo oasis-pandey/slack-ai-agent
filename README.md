@@ -19,6 +19,11 @@ CanvasBot: Here's what's coming up:
            • Essay Draft — ENG202 — due Wed Jul 2
 ```
 
+## Privacy Note
+This bot stores your Canvas Personal Access Token and Base URL securely to personalize your dashboard and answer your questions.
+- **Storage:** Tokens are encrypted at rest using AES (Fernet) and stored in a database (local SQLite or cloud Postgres), on a per-user basis. They are never logged or stored in plain text.
+- **Disconnect:** You can completely remove your credentials and delete your data from the database at any time by clicking the **Disconnect Canvas** button at the bottom of the App Home dashboard.
+
 ## How it works
 
 Three layers run in **one process**:
