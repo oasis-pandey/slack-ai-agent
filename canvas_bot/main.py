@@ -33,6 +33,7 @@ from .slack.blocks import (
     write_confirmation_blocks,
     connect_prompt_blocks,
     connect_modal_view,
+    digest_blocks,
     home_view,
 )
 from .slack.helpers import (
@@ -409,7 +410,43 @@ def handle_refresh_home(ack, body, client, logger):
         logger.exception("failed to refresh home view")
 
 
+def send_digest():
+    """Scheduled job to post a Canvas digest to a configured user or channel."""
+    target_id = os.environ.get("DIGEST_TARGET_USER_ID")
+    if not target_id:
+        return
+    creds = _get_user_creds(target_id)
+    if not creds:
+        logging.warning("Digest skipped: no credentials found for %s", target_id)
+        return
+    try:
+        assignments = canvas_rest.list_upcoming_assignments(creds)
+    except Exception:
+        assignments = []
+    try:
+        announcements = canvas_rest.list_recent_announcements(creds)
+    except Exception:
+        announcements = []
+    
+    blocks = digest_blocks(assignments, announcements)
+    try:
+        app.client.chat_postMessage(channel=target_id, text="Your Canvas Digest", blocks=blocks)
+        logging.info("Sent scheduled digest to %s", target_id)
+    except Exception as e:
+        logging.exception("failed to send digest to %s: %s", target_id, e)
+
+
 if __name__ == "__main__":
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    
+    hour = int(os.environ.get("DIGEST_HOUR", 9))
+    minute = int(os.environ.get("DIGEST_MINUTE", 0))
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(send_digest, CronTrigger(hour=hour, minute=minute))
+    scheduler.start()
+    print(f"⏰ Scheduled digest for {hour:02d}:{minute:02d} daily.")
+
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     print("⚡️ Canvas agent is running (Socket Mode)…")
     handler.start()

@@ -240,6 +240,33 @@ def _context(text: str) -> dict:
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}
 
 
+def digest_blocks(assignments: list[dict], announcements: list[dict], now: datetime | None = None) -> list[dict]:
+    """A compact summary of what's due and what's new for the scheduled digest."""
+    now = now or datetime.now()
+    n_today, m_week = 0, 0
+    for a in assignments:
+        emoji, _ = _due_meta(a.get("due_at"), now)
+        if emoji == "🔴":
+            n_today += 1
+        elif emoji == "🟡":
+            m_week += 1
+    
+    k_new = len(announcements)
+    headline = f"🔴 {n_today} due today  ·  🟡 {m_week} this week  ·  📢 {k_new} new announcements"
+    
+    blocks: list[dict] = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Good morning! ☕️"}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": headline}]},
+    ]
+    
+    if assignments:
+        blocks.append({"type": "divider"})
+        ordered = sorted(assignments, key=lambda r: r.get("due_at") or "9999", reverse=False)
+        blocks.extend(_assignment_card(r, now) for r in ordered[:3])
+        
+    return blocks
+
+
 def home_view(
     grades: list[dict],
     assignments: list[dict],

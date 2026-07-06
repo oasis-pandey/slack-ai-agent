@@ -149,8 +149,8 @@ def list_upcoming_assignments(creds, days: int = UPCOMING_DAYS) -> list[dict]:
     return out
 
 
-def list_current_grades(creds) -> list[dict]:
-    """Return current grade per active student course, for the Home dashboard."""
+def get_active_courses(creds) -> list[dict]:
+    """Return active courses for the current user."""
     base, headers = _api(creds)
     resp = requests.get(
         f"{base}/api/v1/courses",
@@ -159,16 +159,36 @@ def list_current_grades(creds) -> list[dict]:
         timeout=TIMEOUT,
     )
     resp.raise_for_status()
+    return [c for c in resp.json() if isinstance(c, dict)]
+
+
+def list_current_grades(creds) -> list[dict]:
+    """Return current grade per active student course, for the Home dashboard."""
     out: list[dict] = []
-    for c in resp.json():
-        if not isinstance(c, dict):
-            continue
+    for c in get_active_courses(creds):
         for e in c.get("enrollments") or []:
             if e.get("type") == "student":
                 score, grade = e.get("computed_current_score"), e.get("computed_current_grade")
                 if score is not None or grade:
                     out.append({"course": c.get("name") or "(course)", "grade": grade, "score": score})
                 break
+    return out
+
+
+def list_recent_announcements(creds, days=7) -> list[dict]:
+    """Return recent announcements across all active courses."""
+    out: list[dict] = []
+    threshold = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    for c in get_active_courses(creds):
+        try:
+            anns = list_course_announcements(creds, c["id"])
+            for a in anns:
+                if a.get("posted_at") and a["posted_at"] >= threshold:
+                    out.append(a)
+        except Exception:
+            pass
+    # Sort newest first
+    out.sort(key=lambda a: a.get("posted_at") or "", reverse=True)
     return out
 
 

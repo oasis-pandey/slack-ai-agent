@@ -108,6 +108,9 @@ CANVAS_API_URL=https://canvas.youruniversity.edu/api/v1 # includes /api/v1 (canv
 GROQ_API_KEY=...
 CREDS_ENC_KEY=...                                      # Generate using: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 DATABASE_URL=...                                       # Optional Postgres URL (uses local SQLite if omitted)
+DIGEST_TARGET_USER_ID=...                              # (Optional) Slack user ID or channel for scheduled digests
+DIGEST_HOUR=9                                          # (Optional) Hour for the scheduled digest (24h format, default 9)
+DIGEST_MINUTE=0                                        # (Optional) Minute for the scheduled digest (default 0)
 ```
 
 **Required Slack bot scopes:** `app_mentions:read`, `chat:write`, `channels:history`,

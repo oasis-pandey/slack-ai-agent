@@ -7,4 +7,4 @@ cryptography>=41.0.0
 psycopg[binary]>=3.1.0
 # canvas-mcp is installed from git (not on PyPI):
 #   pip install "git+https://github.com/vishalsachdev/canvas-mcp.git"
-canvas-mcp @ git+https://github.com/vishalsachdev/canvas-mcp.git
+canvas-mcp @ git+https://github.com/vishalsachdev/canvas-mcp.gitapscheduler==3.10.4
