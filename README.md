@@ -101,6 +101,8 @@ CANVAS_API_TOKEN=...
 CANVAS_BASE_URL=https://canvas.youruniversity.edu      # no path
 CANVAS_API_URL=https://canvas.youruniversity.edu/api/v1 # includes /api/v1 (canvas-mcp needs this)
 GROQ_API_KEY=...
+CREDS_ENC_KEY=...                                      # Generate using: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+DATABASE_URL=...                                       # Optional Postgres URL (uses local SQLite if omitted)
 ```
 
 **Required Slack bot scopes:** `app_mentions:read`, `chat:write`, `channels:history`,
@@ -145,7 +147,7 @@ outbound WebSocket, so there's no port to expose. It's containerized via the
    builds the `Dockerfile`.
 2. Add every `.env` key as a Railway **service variable**: `SLACK_BOT_TOKEN`,
    `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, `CANVAS_API_TOKEN`, `CANVAS_BASE_URL`,
-   `CANVAS_API_URL`, `GROQ_API_KEY`.
+   `CANVAS_API_URL`, `GROQ_API_KEY`, `CREDS_ENC_KEY`, `DATABASE_URL` (if using Railway Postgres).
 3. Deploy. Watch the logs for `⚡️ Canvas agent is running (Socket Mode)…`, then
    @mention the bot in Slack.
 
