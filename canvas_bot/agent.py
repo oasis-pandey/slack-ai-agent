@@ -149,7 +149,7 @@ def _tool_use_failed_detail(err: BadRequestError):
     return None
 
 
-async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
+async def run_agent(history: list[dict], creds, on_tool_call=None) -> AgentResult:
     """Run the ReAct loop over a conversation and return an AgentResult.
 
     `history` is a list of {"role": "user"|"assistant", "content": str} in
@@ -173,7 +173,7 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
     assignments: list = []
     seen_assignments: set = set()
 
-    async with canvas_session() as session:
+    async with canvas_session(creds) as session:
         # canvas-mcp tools + our local REST-backed tools (e.g. planner notes).
         tools = to_groq_tools((await session.list_tools()).tools) + LOCAL_TOOL_SCHEMAS + [REQUEST_WRITE_CONFIRMATION_SCHEMA]
         messages = [
@@ -283,7 +283,7 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                         )
                     elif tc.function.name in LOCAL_TOOL_NAMES:
                         # Handled by us via direct Canvas REST, not canvas-mcp.
-                        text = dispatch_local_tool(tc.function.name, args)
+                        text = dispatch_local_tool(tc.function.name, args, creds)
                     else:
                         result = await asyncio.wait_for(
                             session.call_tool(tc.function.name, args),
@@ -303,7 +303,7 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                     course_id = args.get("course_identifier")
                     if course_id is not None:
                         try:
-                            for rec in canvas_rest.list_course_announcements(course_id):
+                            for rec in canvas_rest.list_course_announcements(creds, course_id):
                                 key = (rec["course_id"], rec["id"])
                                 if key not in seen_announcements:
                                     seen_announcements.add(key)
@@ -316,11 +316,11 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
                 if tc.function.name in ("get_my_upcoming_assignments", "list_assignments"):
                     try:
                         if tc.function.name == "get_my_upcoming_assignments":
-                            recs = canvas_rest.list_upcoming_assignments()
+                            recs = canvas_rest.list_upcoming_assignments(creds)
                         else:
                             cid = args.get("course_identifier")
                             recs = (
-                                canvas_rest.list_course_assignments(cid)
+                                canvas_rest.list_course_assignments(creds, cid)
                                 if cid is not None
                                 else []
                             )
@@ -354,7 +354,13 @@ async def run_agent(history: list[dict], on_tool_call=None) -> AgentResult:
 if __name__ == "__main__":
     question = " ".join(sys.argv[1:]) or "What assignments do I have coming up?"
     print(f"Q: {question}\n")
-    result = asyncio.run(run_agent([{"role": "user", "content": question}]))
+    from .store import CanvasCreds
+    fallback_creds = CanvasCreds(
+        canvas_base_url=os.environ.get("CANVAS_BASE_URL", ""),
+        canvas_api_url=os.environ.get("CANVAS_API_URL", ""),
+        canvas_token=os.environ.get("CANVAS_API_TOKEN", "")
+    )
+    result = asyncio.run(run_agent([{"role": "user", "content": question}], fallback_creds))
     print(result.text)
     if result.announcements:
         print(f"\n[{len(result.announcements)} announcement(s) for the Slack UI]")

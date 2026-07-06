@@ -49,16 +49,19 @@ ALLOWED_TOOLS = READ_TOOLS | WRITE_TOOLS
 
 
 @asynccontextmanager
-async def canvas_session():
+async def canvas_session(creds):
     """Spawn canvas-mcp over stdio and yield an initialized MCP session.
 
     The subprocess inherits our env, so it sees CANVAS_API_TOKEN /
     CANVAS_API_URL. Env is read here (not at import) so load_dotenv() has run.
     """
+    env = os.environ.copy()
+    env["CANVAS_API_URL"] = creds.canvas_api_url
+    env["CANVAS_API_TOKEN"] = creds.canvas_token
     server = StdioServerParameters(
         command=shutil.which("canvas-mcp-server") or "canvas-mcp-server",
         args=[],
-        env=os.environ.copy(),
+        env=env,
     )
     async with stdio_client(server) as (read, write):
         async with ClientSession(read, write) as session:
@@ -93,8 +96,8 @@ def result_to_text(result):
     return "\n".join(p for p in parts if p) or "(no content returned)"
 
 
-async def call_tool_once(name: str, args: dict) -> str:
+async def call_tool_once(name: str, args: dict, creds) -> str:
     """Helper to open a canvas_session, call a single tool, and return its text result."""
-    async with canvas_session() as session:
+    async with canvas_session(creds) as session:
         result = await session.call_tool(name, args)
         return result_to_text(result)

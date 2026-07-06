@@ -53,10 +53,11 @@ LOCAL_TOOL_SCHEMAS = [
 LOCAL_TOOL_NAMES = {s["function"]["name"] for s in LOCAL_TOOL_SCHEMAS}
 
 
-def dispatch_local_tool(name: str, args: dict) -> str:
+def dispatch_local_tool(name: str, args: dict, creds) -> str:
     """Run a local tool by name and return a plain-text result for the model."""
     if name == "create_planner_note":
         note = canvas_rest.create_planner_note(
+            creds,
             title=args.get("title") or "Untitled to-do",
             details=args.get("details"),
             todo_date=args.get("todo_date"),

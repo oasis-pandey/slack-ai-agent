@@ -20,9 +20,9 @@ MAX_ASSIGNMENTS = 30  # cap per-course assignment fetch
 UPCOMING_DAYS = 14  # window for "what's due" cards
 
 
-def _api():
-    base = os.environ["CANVAS_BASE_URL"].rstrip("/")
-    token = os.environ["CANVAS_API_TOKEN"]
+def _api(creds):
+    base = creds.canvas_base_url.rstrip("/")
+    token = creds.canvas_token
     return base, {"Authorization": f"Bearer {token}"}
 
 
@@ -38,9 +38,9 @@ def _shape(course_id, a: dict) -> dict:
     }
 
 
-def list_course_announcements(course_id) -> list[dict]:
+def list_course_announcements(creds, course_id) -> list[dict]:
     """Return announcements for a course, newest-first, as structured records."""
-    base, headers = _api()
+    base, headers = _api(creds)
     resp = requests.get(
         f"{base}/api/v1/courses/{course_id}/discussion_topics",
         headers=headers,
@@ -51,9 +51,9 @@ def list_course_announcements(course_id) -> list[dict]:
     return [_shape(course_id, a) for a in resp.json()]
 
 
-def get_announcement(course_id, topic_id) -> dict:
+def get_announcement(creds, course_id, topic_id) -> dict:
     """Return a single announcement (including its full HTML body)."""
-    base, headers = _api()
+    base, headers = _api(creds)
     resp = requests.get(
         f"{base}/api/v1/courses/{course_id}/discussion_topics/{topic_id}",
         headers=headers,
@@ -75,13 +75,13 @@ def _shape_assignment(course, course_id, a: dict) -> dict:
     }
 
 
-def list_course_assignments(course_id) -> list[dict]:
+def list_course_assignments(creds, course_id) -> list[dict]:
     """Return a course's assignments (structured), for interactive cards.
 
     Also fetches the course name once so the cards can label the course by name
     rather than a numeric id.
     """
-    base, headers = _api()
+    base, headers = _api(creds)
     resp = requests.get(
         f"{base}/api/v1/courses/{course_id}/assignments",
         headers=headers,
@@ -101,13 +101,13 @@ def list_course_assignments(course_id) -> list[dict]:
     return [_shape_assignment(name, course_id, a) for a in resp.json()]
 
 
-def list_upcoming_assignments(days: int = UPCOMING_DAYS) -> list[dict]:
+def list_upcoming_assignments(creds, days: int = UPCOMING_DAYS) -> list[dict]:
     """Return upcoming assignments/quizzes across all courses (structured).
 
     Uses Canvas's planner, which already carries the course name (`context_name`)
     and a relative URL we absolutize.
     """
-    base, headers = _api()
+    base, headers = _api(creds)
     today = datetime.date.today()
     resp = requests.get(
         f"{base}/api/v1/planner/items",
@@ -141,9 +141,9 @@ def list_upcoming_assignments(days: int = UPCOMING_DAYS) -> list[dict]:
     return out
 
 
-def list_current_grades() -> list[dict]:
+def list_current_grades(creds) -> list[dict]:
     """Return current grade per active student course, for the Home dashboard."""
-    base, headers = _api()
+    base, headers = _api(creds)
     resp = requests.get(
         f"{base}/api/v1/courses",
         headers=headers,
@@ -164,9 +164,9 @@ def list_current_grades() -> list[dict]:
     return out
 
 
-def list_todo() -> list[dict]:
+def list_todo(creds) -> list[dict]:
     """Return the user's Canvas to-do items (structured), for the Home dashboard."""
-    base, headers = _api()
+    base, headers = _api(creds)
     resp = requests.get(f"{base}/api/v1/users/self/todo", headers=headers, timeout=TIMEOUT)
     resp.raise_for_status()
     out: list[dict] = []
@@ -183,14 +183,14 @@ def list_todo() -> list[dict]:
     return out
 
 
-def create_planner_note(title: str, details=None, todo_date=None) -> dict:
+def create_planner_note(creds, title: str, details=None, todo_date=None) -> dict:
     """Create a private planner note (a personal to-do) for the current user.
 
     canvas-mcp doesn't wrap Canvas's planner notes, so we hit the REST API
     directly. The note is visible only to the token's owner — no one else sees
     it — which makes this the safest write to exercise end to end.
     """
-    base, headers = _api()
+    base, headers = _api(creds)
     # Canvas rejects a planner note with a blank todo_date (400), so default to
     # today when the caller has none (e.g. an assignment with no due date).
     payload: dict = {
