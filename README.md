@@ -141,22 +141,22 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest -q
 ```
 
-## Deploy (Koyeb)
+## Deploy (Railway)
 
 The bot runs as a **long-lived worker**, not a web service — Socket Mode opens an
 outbound WebSocket, so there's no port to expose. It's containerized via the
 `Dockerfile` (which installs `git` so canvas-mcp's git dependency resolves, and puts
 `canvas-mcp-server` on `PATH`).
 
-We recommend [Koyeb's Free Eco tier](https://www.koyeb.com/) because it provides an always-on background worker that doesn't sleep.
+1. Create a new Railway project from this GitHub repo. Railway reads `railway.json` and
+   builds the `Dockerfile`.
+2. Add every `.env` key as a Railway **service variable**: `SLACK_BOT_TOKEN`,
+   `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, `GROQ_API_KEY`, `CREDS_ENC_KEY`,
+   and `DATABASE_URL` (if using Railway Postgres).
+3. Deploy. Watch the logs for `⚡️ Canvas agent is running (Socket Mode)…`, then
+   @mention the bot in Slack.
 
-1. Create a free account on Koyeb and connect your GitHub account.
-2. Click **Create App** and select your GitHub repository.
-3. Koyeb will automatically detect the `Dockerfile`. Under the advanced settings, set the instance type to the **Free (Eco)** tier.
-4. Add your Environment Variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, `GROQ_API_KEY`, and `CREDS_ENC_KEY`.
-5. Deploy the app. Watch the logs for `⚡️ Bolt app is running!`, then @mention the bot in Slack.
-
-No public URL, database, or open port is required for the bot to run.
+No public URL, database, or open port is required.
 
 ## Conventions
 

@@ -547,6 +547,8 @@ def send_digest():
 if __name__ == "__main__":
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
     
     hour = int(os.environ.get("DIGEST_HOUR", 9))
     minute = int(os.environ.get("DIGEST_MINUTE", 0))
@@ -554,6 +556,23 @@ if __name__ == "__main__":
     scheduler.add_job(send_digest, CronTrigger(hour=hour, minute=minute))
     scheduler.start()
     print(f"⏰ Scheduled digest for {hour:02d}:{minute:02d} daily.")
+
+    class HealthCheckHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+        def log_message(self, format, *args):
+            pass # Keep logs clean from pings
+
+    def run_health_server():
+        port = int(os.environ.get("PORT", 10000))
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        print(f"🏥 Health check server running on port {port}...")
+        server.serve_forever()
+
+    threading.Thread(target=run_health_server, daemon=True).start()
 
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     print("⚡️ Canvas agent is running (Socket Mode)…")
