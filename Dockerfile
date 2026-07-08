@@ -1,5 +1,5 @@
-# Canvas Slack Agent — runs as a long-lived Socket Mode worker (no inbound port).
-FROM python:3.13-slim
+# Builder stage
+FROM python:3.13-slim as builder
 
 # git is needed at build time: canvas-mcp installs from a git URL (see requirements.txt).
 RUN apt-get update \
@@ -9,15 +9,40 @@ RUN apt-get update \
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-WORKDIR /app
+WORKDIR /build
 
-# Install deps first so the layer caches across code-only changes.
+# Create a virtual environment so we can copy it as a single directory
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# canvas-mcp installs a `canvas-mcp-server` console script onto PATH; the bot
-# spawns it as a stdio subprocess at runtime.
+
+# Runtime stage
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+# Create a non-root user
+RUN useradd --create-home appuser
+
+WORKDIR /app
+
+# Copy the built virtual environment from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy the application code
 COPY . .
+
+# Change ownership of the app directory to the non-root user
+RUN chown -R appuser:appuser /app
+
+# Switch to the non-root user
+USER appuser
 
 # Socket Mode opens an outbound WebSocket — there is nothing to EXPOSE.
 CMD ["python", "-m", "canvas_bot.main"]

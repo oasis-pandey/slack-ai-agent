@@ -220,15 +220,13 @@ def test_home_view_grades_render_with_letter_and_percent():
     assert "A (93%)" in text  # score rounded
 
 
-def test_home_view_empty_due_soon_shows_friendly_state():
-    view = home_view([_grade()], [], [], now=NOW)
-    ctx = " ".join(
-        e["text"]
-        for b in view["blocks"]
-        if b.get("type") == "context"
-        for e in b["elements"]
-    )
-    assert "Nothing due" in ctx
+def test_home_view_empty_states_rendered_friendly():
+    view = home_view([], [], [], now=NOW)
+    blocks = view["blocks"]
+    text = json.dumps(blocks)
+    assert "Nothing due soon" in text
+    assert "No grades posted yet" in text
+    assert "Your to-do list is spotless" in text
 
 
 def test_home_view_shows_assignment_cards_when_present():
@@ -241,12 +239,7 @@ def test_home_view_shows_assignment_cards_when_present():
     assert len(remind) == 1  # the assignment card, reused from the message list
 
 
-def test_home_view_todos_section_only_when_present():
-    without = home_view([_grade()], [], [], now=NOW)
-    with_todos = home_view([_grade()], [], [{"title": "Read ch. 5", "course": "ENG202"}], now=NOW)
-    headers_without = [b for b in without["blocks"] if b.get("type") == "header"]
-    headers_with = [b for b in with_todos["blocks"] if b.get("type") == "header"]
-    assert len(headers_with) == len(headers_without) + 1  # adds the "To-dos" header
+
 
 
 # --- announcement_modal_view ------------------------------------------------
@@ -389,3 +382,17 @@ def test_announcement_composer_view_empty_courses():
     assert len(options) == 1
     assert options[0]["value"] == "none"
     assert "No active courses found" in options[0]["text"]["text"]
+
+
+# --- _progress_bar ----------------------------------------------------------
+
+def test_progress_bar():
+    from canvas_bot.slack.blocks import _progress_bar
+    assert _progress_bar(0) == "░░░░░░░░░░"
+    assert _progress_bar(5) == "█░░░░░░░░░"
+    assert _progress_bar(12) == "█░░░░░░░░░"
+    assert _progress_bar(15) == "██░░░░░░░░"
+    assert _progress_bar(50) == "█████░░░░░"
+    assert _progress_bar(85) == "█████████░"
+    assert _progress_bar(100) == "██████████"
+    assert _progress_bar(120) == "██████████"

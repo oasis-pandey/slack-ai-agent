@@ -39,6 +39,12 @@ HOME_DUE_LIMIT = 5
 HOME_GRADES_LIMIT = 8
 HOME_TODO_LIMIT = 5
 
+# Friendly empty states
+MSG_NO_DUE = "🎉 Nothing due soon — go touch grass!"
+MSG_NO_GRADES = "📚 No grades posted yet. Enjoy the suspense!"
+MSG_NO_TODOS = "✅ Your to-do list is spotless!"
+MSG_NO_ANNOUNCEMENTS = "📢 No new announcements."
+
 
 def _fmt_date(iso: str | None) -> str:
     """'2026-06-30T21:00:00Z' -> 'Jun 30, 2026' (best effort, empty on failure)."""
@@ -102,6 +108,9 @@ def announcement_list_blocks(records: list[dict]) -> list[dict]:
     footer noting how many were hidden and how to narrow the ask.
     """
     total = len(records)
+    if total == 0:
+        return [{"type": "context", "elements": [{"type": "mrkdwn", "text": MSG_NO_ANNOUNCEMENTS}]}]
+
     # Newest first. posted_at is an ISO string (or None); "" sorts last, which
     # is what we want for undated records.
     ordered = sorted(records, key=lambda r: r.get("posted_at") or "", reverse=True)
@@ -208,6 +217,9 @@ def assignment_card_blocks(records: list[dict], now: datetime | None = None) -> 
     """
     now = now or datetime.now()
     total = len(records)
+    if total == 0:
+        return [{"type": "context", "elements": [{"type": "mrkdwn", "text": MSG_NO_DUE}]}]
+
     # Soonest due first; missing due dates sort last.
     ordered = sorted(records, key=lambda r: r.get("due_at") or "9999", reverse=False)
     shown = ordered[:MAX_CARDS]
@@ -224,15 +236,25 @@ def assignment_card_blocks(records: list[dict], now: datetime | None = None) -> 
     return blocks
 
 
+def _progress_bar(pct: float) -> str:
+    """Generate a 10-block ASCII/emoji progress bar."""
+    filled = int(pct / 10.0 + 0.5)
+    filled = max(0, min(10, filled))
+    return ("█" * filled) + ("░" * (10 - filled))
+
+
 def _grade_line(g: dict) -> str:
-    """'• *CS.2318.001* — A (102%)' from a grade record."""
+    """'• *CS.2318.001* — A (102%) [██████████]' from a grade record."""
     grade, score = g.get("grade"), g.get("score")
-    pct = f"{round(score)}%" if isinstance(score, (int, float)) else None
-    if grade and pct:
-        val = f"{grade} ({pct})"
+    pct_text = f"{round(score)}%" if isinstance(score, (int, float)) else None
+    
+    bar = f" `{_progress_bar(score)}`" if isinstance(score, (int, float)) else ""
+    
+    if grade and pct_text:
+        val = f"{grade} ({pct_text})"
     else:
-        val = grade or pct or "—"
-    return f"• *{g.get('course') or 'Course'}* — {val}"
+        val = grade or pct_text or "—"
+    return f"• *{g.get('course') or 'Course'}* — {val}{bar}"
 
 
 def _header(text: str) -> dict:
@@ -306,7 +328,7 @@ def home_view(
         ordered = sorted(assignments, key=lambda r: r.get("due_at") or "9999")
         blocks.extend(_assignment_card(r, now) for r in ordered[:HOME_DUE_LIMIT])
     else:
-        blocks.append(_context("🎉 Nothing due in the next two weeks."))
+        blocks.append(_context(MSG_NO_DUE))
 
     blocks.append({"type": "divider"})
     blocks.append(_header("📊 Grades"))
@@ -314,7 +336,7 @@ def home_view(
         lines = "\n".join(_grade_line(g) for g in grades[:HOME_GRADES_LIMIT])
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": lines}})
     else:
-        blocks.append(_context("No grades posted yet."))
+        blocks.append(_context(MSG_NO_GRADES))
 
     if todos:
         blocks.append({"type": "divider"})
@@ -325,6 +347,10 @@ def home_view(
             for t in todos[:HOME_TODO_LIMIT]
         )
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": lines}})
+    else:
+        blocks.append({"type": "divider"})
+        blocks.append(_header("✅ To-dos"))
+        blocks.append(_context(MSG_NO_TODOS))
 
     blocks.append({"type": "divider"})
     blocks.append({

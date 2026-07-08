@@ -38,6 +38,8 @@ from .slack.blocks import (
     connect_modal_view,
     digest_blocks,
     home_view,
+    _grade_line,
+    MSG_NO_GRADES,
 )
 from .slack.helpers import (
     MENTION_RE,
@@ -137,8 +139,31 @@ def handle_mention(event, client, say):
     # Plain chat ("hey") never triggers this, so it just gets a direct reply.
     placeholder = {}
 
-    def notify_canvas():
-        placeholder["ts"] = say(text=WORKING_MSG, thread_ts=thread_ts)["ts"]
+    def notify_canvas(tool_name: str):
+        tool_msgs = {
+            "list_courses": "Finding your courses",
+            "list_upcoming_assignments": "Checking due dates",
+            "get_course_details": "Reading course details",
+            "get_assignment_details": "Reading assignment details",
+            "list_recent_announcements": "Checking for announcements",
+            "list_current_grades": "Fetching your grades",
+            "list_todo": "Checking your to-do list",
+            "create_announcement": "Drafting announcement",
+        }
+        msg = tool_msgs.get(tool_name, "Checking Canvas")
+        text = WORKING_MSG + f" ({msg}…)"
+        
+        try:
+            if "ts" not in placeholder:
+                placeholder["ts"] = say(text=text, thread_ts=thread_ts)["ts"]
+            else:
+                app.client.chat_update(
+                    channel=body["event"]["channel"],
+                    ts=placeholder["ts"],
+                    text=text
+                )
+        except Exception:
+            pass
 
     try:
         # run_agent is async; each mention gets its own short-lived event loop.
@@ -457,6 +482,42 @@ def handle_composer_modal_submission(ack, body, client, view, logger):
             pass
 
 
+@app.command("/canvas")
+def handle_canvas_command(ack, body, respond, logger):
+    """Handle /canvas slash commands for quick data access without LLM latency."""
+    ack()
+    user_id = body["user_id"]
+    text = body.get("text", "").strip().lower()
+    creds = _get_user_creds(user_id)
+    
+    if not creds:
+        respond(blocks=connect_prompt_blocks())
+        return
+
+    try:
+        if text == "due":
+            assignments = canvas_rest.list_upcoming_assignments(creds)
+            blocks = assignment_card_blocks(assignments)
+            respond(blocks=blocks)
+        elif text == "grades":
+            grades = canvas_rest.list_current_grades(creds)
+            if grades:
+                lines = "\n".join(_grade_line(g) for g in grades)
+                blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": f"*📊 Your Grades*\n{lines}"}}]
+            else:
+                blocks = [{"type": "context", "elements": [{"type": "mrkdwn", "text": MSG_NO_GRADES}]}]
+            respond(blocks=blocks)
+        elif text == "announcements":
+            announcements = canvas_rest.list_recent_announcements(creds)
+            blocks = announcement_list_blocks(announcements)
+            respond(blocks=blocks)
+        else:
+            respond(text="Unknown command. Try `/canvas due`, `/canvas grades`, or `/canvas announcements`.")
+    except Exception:
+        logger.exception("failed to handle /canvas %s", text)
+        respond(text="Something went wrong while fetching data from Canvas.")
+
+
 def send_digest():
     """Scheduled job to post a Canvas digest to a configured user or channel."""
     target_id = os.environ.get("DIGEST_TARGET_USER_ID")
@@ -486,6 +547,8 @@ def send_digest():
 if __name__ == "__main__":
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
     
     hour = int(os.environ.get("DIGEST_HOUR", 9))
     minute = int(os.environ.get("DIGEST_MINUTE", 0))
@@ -493,6 +556,23 @@ if __name__ == "__main__":
     scheduler.add_job(send_digest, CronTrigger(hour=hour, minute=minute))
     scheduler.start()
     print(f"⏰ Scheduled digest for {hour:02d}:{minute:02d} daily.")
+
+    class HealthCheckHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+        def log_message(self, format, *args):
+            pass # Keep logs clean from pings
+
+    def run_health_server():
+        port = int(os.environ.get("PORT", 10000))
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        print(f"🏥 Health check server running on port {port}...")
+        server.serve_forever()
+
+    threading.Thread(target=run_health_server, daemon=True).start()
 
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     print("⚡️ Canvas agent is running (Socket Mode)…")
