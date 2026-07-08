@@ -266,7 +266,8 @@ async def run_agent(
                         on_tool_call(tc.function.name)
                     except Exception:
                         pass
-                logger.info("Agent tool call: %s(%s)", tc.function.name, tc.function.arguments)
+                import logging
+                logging.info("Agent tool call: %s(%s)", tc.function.name, tc.function.arguments)
 
                 try:
                     args = json.loads(tc.function.arguments or "{}")
