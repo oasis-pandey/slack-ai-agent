@@ -304,7 +304,21 @@ def handle_confirm_write(ack, body, client, logger):
         tool_name = payload["tool_name"]
         args = payload["args"]
         logging.info("confirm_write: tool=%s args=%s", tool_name, json.dumps(args))
-        
+
+        # Safety net: if the agent passed a course name instead of a numeric ID,
+        # resolve it by matching against the user's active courses.
+        cid = args.get("course_identifier", "")
+        if cid and not cid.isdigit():
+            try:
+                courses = canvas_rest.get_active_courses(creds)
+                for c in courses:
+                    if c.get("name", "").lower() == cid.lower():
+                        args["course_identifier"] = str(c["id"])
+                        logging.info("confirm_write: resolved '%s' -> %s", cid, args["course_identifier"])
+                        break
+            except Exception:
+                pass
+
         result_text = asyncio.run(bridge.call_tool_once(tool_name, args, creds))
         
         client.chat_update(
