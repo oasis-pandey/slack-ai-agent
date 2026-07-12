@@ -26,12 +26,9 @@ from .slack.blocks import (
     ACTION_CANCEL_WRITE,
     ACTION_CONNECT_CANVAS,
     ACTION_DISCONNECT_CANVAS,
-    ACTION_NEW_ANNOUNCEMENT,
     CALLBACK_CONNECT_MODAL,
-    CALLBACK_COMPOSER_MODAL,
     announcement_list_blocks,
     announcement_modal_view,
-    announcement_composer_view,
     assignment_card_blocks,
     write_confirmation_blocks,
     connect_prompt_blocks,
@@ -312,25 +309,14 @@ def handle_confirm_write(ack, body, client, logger):
             try:
                 courses = canvas_rest.get_active_courses(creds)
                 for c in courses:
-                    if c.get("name", "").lower() == cid.lower():
+                    if cid.lower() in c.get("name", "").lower():
                         args["course_identifier"] = str(c["id"])
                         logging.info("confirm_write: resolved '%s' -> %s", cid, args["course_identifier"])
                         break
             except Exception:
                 pass
 
-        # Route create_announcement through direct REST (canvas-mcp has course
-        # resolution issues that cause 404s). Other writes go through MCP.
-        if tool_name == "create_announcement":
-            data = canvas_rest.create_announcement(
-                creds,
-                course_id=args.get("course_identifier", ""),
-                title=args.get("title", ""),
-                message=args.get("message", ""),
-            )
-            result_text = f"Announcement '{data.get('title')}' created successfully."
-        else:
-            result_text = asyncio.run(bridge.call_tool_once(tool_name, args, creds))
+        result_text = asyncio.run(bridge.call_tool_once(tool_name, args, creds))
         
         client.chat_update(
             channel=body["channel"]["id"],
@@ -463,49 +449,6 @@ def handle_refresh_home(ack, body, client, logger):
     except Exception:
         logger.exception("failed to refresh home view")
 
-
-@app.action(ACTION_NEW_ANNOUNCEMENT)
-def handle_new_announcement(ack, body, client, logger):
-    """Open the modal composer for a new announcement when the Home button is clicked."""
-    ack()
-    creds = _get_user_creds(body["user"]["id"])
-    if not creds:
-        return
-    try:
-        courses = canvas_rest.get_active_courses(creds)
-        client.views_open(trigger_id=body["trigger_id"], view=announcement_composer_view(courses))
-    except Exception:
-        logger.exception("failed to open announcement composer")
-
-
-@app.view(CALLBACK_COMPOSER_MODAL)
-def handle_composer_modal_submission(ack, body, client, view, logger):
-    """Parse the composer inputs and prompt for confirmation via a direct message."""
-    ack(response_action="clear")
-    user_id = body["user"]["id"]
-    try:
-        values = view["state"]["values"]
-        course_opt = values["course_block"]["course_input"]["selected_option"]
-        course_id = course_opt["value"]
-        course_name = course_opt["text"]["text"]
-        title = values["title_block"]["title_input"]["value"]
-        message = values["body_block"]["body_input"]["value"]
-        
-        args = {
-            "course_identifier": course_id,
-            "title": title,
-            "message": message,
-        }
-        summary = f"New announcement in {course_name}: {title}"
-        
-        blocks = write_confirmation_blocks(summary=summary, tool_name="create_announcement", args=args)
-        client.chat_postMessage(channel=user_id, text="Please confirm your action.", blocks=blocks)
-    except Exception:
-        logger.exception("failed to handle composer submission")
-        try:
-            client.chat_postMessage(channel=user_id, text="Something went wrong while preparing the announcement.")
-        except Exception:
-            pass
 
 
 @app.command("/canvas")

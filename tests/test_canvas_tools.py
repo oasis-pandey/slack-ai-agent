@@ -61,7 +61,6 @@ def test_read_tools_are_non_mutating():
 def test_write_tools_are_the_deliberate_mvp_set():
     # Writes must be an explicit, reviewed allowlist — not accidental.
     assert WRITE_TOOLS == {
-        "create_announcement",
         "create_discussion_topic",
         "post_discussion_entry",
         "reply_to_discussion_entry",
