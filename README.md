@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/oasis-pandey/slack-ai-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/oasis-pandey/slack-ai-agent/actions/workflows/ci.yml)
 
+📐 [**Architecture Diagram**](architecture_diagram.md)
+
 A **Canvas LMS assistant that lives in Slack.** @mention the bot in a thread, ask a
 natural-language question about your Canvas — courses, assignments, to-dos, grades,
 announcements, or syllabus — and a ReAct agent answers with real data pulled live from
