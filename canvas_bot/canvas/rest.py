@@ -232,3 +232,27 @@ def create_planner_note(creds, title: str, details=None, todo_date=None) -> dict
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def create_announcement(creds, course_id, title: str, message: str) -> dict:
+    """Create an announcement in a course via direct Canvas REST.
+
+    Bypasses canvas-mcp which has issues resolving course identifiers.
+    The course_id must be the numeric Canvas course ID.
+    """
+    base, headers = _api(creds)
+    # Resolve course name to numeric ID if needed
+    if not str(course_id).isdigit():
+        for c in get_active_courses(creds):
+            if c.get("name", "").lower() == str(course_id).lower():
+                course_id = c["id"]
+                break
+    resp = requests.post(
+        f"{base}/api/v1/courses/{course_id}/discussion_topics",
+        headers=headers,
+        json={"title": title, "message": message, "is_announcement": True},
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data
