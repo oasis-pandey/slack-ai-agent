@@ -319,7 +319,18 @@ def handle_confirm_write(ack, body, client, logger):
             except Exception:
                 pass
 
-        result_text = asyncio.run(bridge.call_tool_once(tool_name, args, creds))
+        # Route create_announcement through direct REST (canvas-mcp has course
+        # resolution issues that cause 404s). Other writes go through MCP.
+        if tool_name == "create_announcement":
+            data = canvas_rest.create_announcement(
+                creds,
+                course_id=args.get("course_identifier", ""),
+                title=args.get("title", ""),
+                message=args.get("message", ""),
+            )
+            result_text = f"Announcement '{data.get('title')}' created successfully."
+        else:
+            result_text = asyncio.run(bridge.call_tool_once(tool_name, args, creds))
         
         client.chat_update(
             channel=body["channel"]["id"],
