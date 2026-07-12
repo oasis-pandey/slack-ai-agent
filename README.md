@@ -85,6 +85,70 @@ database — survives restarts. Only the thread is read, not loose channel messa
 - **Retry dedupe** by `client_msg_id` — the handler is slow (>3s), so Slack redelivers
   events; without dedupe each redelivery would spawn a duplicate agent run.
 
+## Bring CanvasBot to Your Workspace
+
+Want to run CanvasBot in your own Slack workspace? Follow these steps:
+
+### 1. Create a Slack App
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**.
+2. Under **Socket Mode**, enable it — this generates your `SLACK_APP_TOKEN` (`xapp-…`).
+3. Under **OAuth & Permissions**, add these **Bot Token Scopes**:
+   - `app_mentions:read`, `chat:write`, `channels:history`, `groups:history`,
+     `im:history`, `mpim:history`, `users:read`
+4. Under **Event Subscriptions**, enable events and subscribe to:
+   - `app_mention`, `app_home_opened`
+5. Under **Interactivity & Shortcuts**, toggle **Interactivity** on (no Request URL needed for Socket Mode).
+6. **Install to Workspace** — copy the `SLACK_BOT_TOKEN` (`xoxb-…`) and `SLACK_SIGNING_SECRET` from **Basic Information**.
+
+### 2. Get a Groq API Key
+
+Sign up at [console.groq.com](https://console.groq.com), create an API key, and copy it.
+
+### 3. Clone & Configure
+
+```bash
+git clone https://github.com/oasis-pandey/slack-ai-agent.git
+cd slack-ai-agent
+```
+
+Create a `.env` file with your keys:
+
+```
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+SLACK_SIGNING_SECRET=...
+GROQ_API_KEY=...
+CREDS_ENC_KEY=...    # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+### 4. Run
+
+```bash
+# Option A: Local
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m canvas_bot.main
+
+# Option B: Docker
+docker build -t canvas-bot .
+docker run --env-file .env canvas-bot
+```
+
+You should see `⚡️ Canvas agent is running (Socket Mode)…` in the logs.
+
+### 5. Connect Your Canvas
+
+1. Open the bot's **App Home** tab in Slack.
+2. Click **🔗 Connect Canvas**.
+3. Enter your Canvas URL (e.g. `https://canvas.youruniv.edu`) and a
+   [Personal Access Token](https://community.canvaslms.com/t5/Student-Guide/How-do-I-manage-API-access-tokens-as-a-student/ta-p/273) from Canvas → Account → Settings → New Access Token.
+4. Done — ask the bot anything about your courses, grades, or assignments!
+
+To disconnect at any time, click **Disconnect Canvas** at the bottom of the App Home dashboard.
+
+---
+
 ## Setup
 
 ```bash
