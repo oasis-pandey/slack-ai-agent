@@ -39,7 +39,6 @@ READ_TOOLS = {
 # agent's system prompt REQUIRES an explicit user confirmation before calling
 # any of these. Kept a small, deliberate MVP set (see docs/planning.md).
 WRITE_TOOLS = {
-    "create_announcement",
     "create_discussion_topic",
     "post_discussion_entry",
     "reply_to_discussion_entry",
