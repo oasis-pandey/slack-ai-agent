@@ -303,6 +303,7 @@ def handle_confirm_write(ack, body, client, logger):
         payload = json.loads(body["actions"][0]["value"])
         tool_name = payload["tool_name"]
         args = payload["args"]
+        logging.info("confirm_write: tool=%s args=%s", tool_name, json.dumps(args))
         
         result_text = asyncio.run(bridge.call_tool_once(tool_name, args, creds))
         
