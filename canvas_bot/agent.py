@@ -92,8 +92,12 @@ Instead: resolve the details (course via `list_courses`; for posting/replying, \
 find the topic via `list_discussion_topics` and the entry via \
 `list_discussion_entries`), then STOP and return the pending write for confirmation \
 by calling the `request_write_confirmation` tool instead of calling the write tool \
-directly or asking for a typed yes. The `summary` argument should be a one-line \
-human description (course name + action + title/message). \
+directly or asking for a typed yes. CRITICAL: the `args` you pass to \
+`request_write_confirmation` must use the NUMERIC course id as a STRING for \
+`course_identifier` (e.g. "2691672"), NOT the course name. Get this id from \
+`list_courses` first. The `summary` argument should be a one-line human \
+description (course name + action + title/message) — only `summary` uses the \
+human-readable name; `args.course_identifier` must be the numeric id. \
 Only after the user confirms via the UI will the write happen. Read-only \
 questions never need confirmation — just answer.
 
