@@ -10,7 +10,7 @@ announcements, or syllabus — and a ReAct agent answers with real data pulled l
 Canvas.
 
 Single-user MVP. Reads are the core; a small, confirmation-gated set of write actions
-(create announcements/discussions, post/reply, add a private to-do) is also supported.
+(create discussions, post/reply, add a private to-do) is also supported.
 Built for the Slack Agent Builder Challenge.
 
 ```
@@ -226,8 +226,8 @@ No public URL, database, or open port is required.
 
 ## Conventions
 
-- **Limited, confirmation-gated writes.** The only supported writes are creating an
-  announcement or discussion, posting/replying to a discussion, and adding a private
+- **Limited, confirmation-gated writes.** The only supported writes are creating a
+  discussion, posting/replying to a discussion, and adding a private
   planner note (to-do). For the course-visible writes the bot restates the action and
   waits for explicit confirmation before doing anything; the private to-do is created
   directly. Anything else (submitting assignments, grading, deleting) is unsupported.
